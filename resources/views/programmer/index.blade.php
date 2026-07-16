@@ -1,0 +1,2 @@
+@extends('layouts.app')
+@section('content')<h3>Programmer Requests</h3><table class="table table-bordered"><tr><th>No.</th><th>Item</th><th>Status</th><th>Action</th></tr>@foreach($requests as $r)<tr><td>{{ $r->request_no }}</td><td>{{ $r->item_type }}</td><td>{{ $r->status }}</td><td><a href="{{ route('programmer.requests.show',$r) }}">Update</a></td></tr>@endforeach</table>{{ $requests->links() }}@endsection

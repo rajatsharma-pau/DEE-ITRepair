@@ -1,0 +1,6 @@
+@extends('layouts.app')
+@section('content')
+<h4>Repair Category Master</h4>
+<div class="card mb-3"><div class="card-body"><form method="POST" action="{{ route('masters.repair-categories.store') }}">@csrf<div class="row"><div class="col-md-3"><input name="name" class="form-control" placeholder="Category" required></div><div class="col-md-3"><select name="item_group" class="form-control"><option>Computer Related</option><option>Non Computer</option><option>General</option></select></div><div class="col-md-3"><select name="default_handler" class="form-control"><option value="programmer">Programmer</option><option value="storekeeper">Storekeeper</option><option value="store_incharge">Store Incharge</option><option value="director">Director</option></select></div><div class="col-md-1"><label><input type="checkbox" name="is_active" checked> Active</label></div><div class="col-md-2"><button class="btn btn-success">Add</button></div></div></form></div></div>
+<table class="table table-bordered table-sm"><thead><tr><th>Name</th><th>Group</th><th>Default Handler</th><th>Active</th></tr></thead><tbody>@foreach($items as $i)<tr><td>{{ $i->name }}</td><td>{{ $i->item_group }}</td><td>{{ $i->default_handler }}</td><td>{{ $i->is_active?'Yes':'No' }}</td></tr>@endforeach</tbody></table>
+@endsection
