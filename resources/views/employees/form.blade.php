@@ -1,89 +1,436 @@
-@php($roleOptions = \App\Support\AccessScope::roleOptions())
-@php($selectedRoles = old('roles', $employee->user ? $employee->user->roleNames() : ['employee']))
-<div class="card mb-3"><div class="card-header">Login & Basic Details</div><div class="card-body">
-<div class="row">
-    <div class="col-md-2 form-group"><label>Salutation</label><select name="salutation" class="form-control"><option value="">Select</option>@foreach(['Mr.','Mrs.','Ms.','Dr.','Er.','Prof.'] as $s)<option value="{{ $s }}" {{ old('salutation', $employee->salutation)==$s?'selected':'' }}>{{ $s }}</option>@endforeach</select></div>
-    <div class="col-md-3 form-group"><label class="required">First Name</label><input name="first_name" class="form-control" value="{{ old('first_name', $employee->first_name) }}" required></div>
-    <div class="col-md-3 form-group"><label>Middle Name</label><input name="middle_name" class="form-control" value="{{ old('middle_name', $employee->middle_name) }}"></div>
-    <div class="col-md-4 form-group"><label>Last Name</label><input name="last_name" class="form-control" value="{{ old('last_name', $employee->last_name) }}"></div>
-    <div class="col-md-3 form-group"><label>Phone/Login ID</label><input name="phone" class="form-control" value="{{ old('phone', $employee->phone) }}"></div>
-    <div class="col-md-3 form-group"><label>Email</label><input name="email" class="form-control" value="{{ old('email', $employee->email) }}"></div>
-    <div class="col-md-3 form-group"><label>Password {{ $employee->exists ? '(blank = no change)' : '' }}</label><input type="password" name="password" class="form-control"></div>
-    <div class="col-md-3 form-group"><label>Roles</label><select name="roles[]" class="form-control" multiple size="4">@foreach($roleOptions as $r)<option value="{{ $r }}" {{ in_array($r, $selectedRoles) ? 'selected':'' }}>{{ ucwords(str_replace('_',' ', $r)) }}</option>@endforeach</select><small>One phone login can have multiple roles. Example: Admin + Storekeeper.</small></div>
-    <div class="col-md-3 form-group"><label>Photo</label><input type="file" name="photo" class="form-control-file">@if($employee->photo_url)<img src="{{ $employee->photo_url }}" class="photo-thumb mt-2">@endif</div>
-    <div class="col-md-3 form-group pt-4"><label><input type="checkbox" name="is_active" value="1" {{ old('is_active', optional($employee->user)->is_active ?? true) ? 'checked':'' }}> Login Active</label></div>
+@php
+    $authUser = Auth::user();
+
+    $safeDate = function ($value) {
+        if (empty($value)) {
+            return '';
+        }
+        try {
+            if (is_object($value) && method_exists($value, 'format')) {
+                return $value->format('Y-m-d');
+            }
+            return date('Y-m-d', strtotime($value));
+        } catch (\Exception $e) {
+            return '';
+        }
+    };
+
+    $scopeCollegeId = null;
+    $scopeDepartmentId = null;
+
+    if ($authUser) {
+        if (method_exists(\App\Support\AccessScope::class, 'collegeId')) {
+            $scopeCollegeId = \App\Support\AccessScope::collegeId($authUser);
+        } elseif (isset($authUser->college_id)) {
+            $scopeCollegeId = $authUser->college_id;
+        }
+
+        if (method_exists(\App\Support\AccessScope::class, 'departmentId')) {
+            $scopeDepartmentId = \App\Support\AccessScope::departmentId($authUser);
+        } elseif (isset($authUser->department_id)) {
+            $scopeDepartmentId = $authUser->department_id;
+        }
+    }
+
+    $selectedCollegeId = old('college_id', $employee->college_id ?: $scopeCollegeId);
+    $selectedDepartmentId = old('department_id', $employee->department_id ?: $scopeDepartmentId);
+
+    $isSuperuser = $authUser && method_exists($authUser, 'hasRole') && $authUser->hasRole('superuser');
+    $isCollegeLevelAdmin = $authUser && method_exists($authUser, 'hasAnyRole') && $authUser->hasAnyRole(['admin', 'college_admin', 'director']);
+    $isDepartmentAdmin = $authUser && method_exists($authUser, 'hasRole') && $authUser->hasRole('department_admin');
+
+    // Superuser can choose any college/department. College-level admin can choose department in own college.
+    // Department Admin and functional users are locked to their own posting/scope.
+    $canChooseCollege = $isSuperuser;
+    $canChooseDepartment = $isSuperuser || $isCollegeLevelAdmin;
+
+    if ($isDepartmentAdmin) {
+        $canChooseCollege = false;
+        $canChooseDepartment = false;
+    }
+
+    $roleOptions = \App\Support\AccessScope::roleOptions(isset($employee) ? $employee : null);
+    $selectedRoles = old('roles', []);
+
+    if (empty($selectedRoles) && isset($employee) && $employee->user && method_exists($employee->user, 'roleNames')) {
+        $selectedRoles = $employee->user->roleNames();
+    }
+
+    if (empty($selectedRoles)) {
+        $selectedRoles = ['employee'];
+    }
+
+    if (!is_array($selectedRoles)) {
+        $selectedRoles = collect($selectedRoles)->toArray();
+    }
+
+    $scopeText = method_exists(\App\Support\AccessScope::class, 'scopeLabel') ? \App\Support\AccessScope::scopeLabel($authUser) : 'Scope: Based on login';
+@endphp
+
+@push('styles')
+<style>
+    .employee-form .card { border:0; border-radius:10px; box-shadow:0 2px 10px rgba(0,0,0,.07); }
+    .employee-form .card-header { background:#f8fafc; font-weight:700; border-bottom:1px solid #e9ecef; }
+    .employee-form .section-help { font-size:12px; color:#6c757d; font-weight:400; margin-left:6px; }
+    .employee-form label.required:after { content:' *'; color:#dc3545; font-weight:800; }
+    .employee-form .form-control:focus { border-color:#1f7f4c; box-shadow:0 0 0 .12rem rgba(31,127,76,.18); }
+    .employee-form .field-help { font-size:12px; color:#6c757d; display:block; margin-top:3px; }
+    .employee-form .scope-box { border-left:4px solid #1f7f4c; background:#eef9f3; padding:10px 12px; border-radius:6px; color:#235c43; }
+    .employee-form .scope-locked { background:#f1f3f5; cursor:not-allowed; }
+    .employee-form .photo-thumb { width:74px; height:74px; object-fit:cover; border-radius:8px; border:1px solid #dee2e6; }
+    .employee-form .small-title { font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:#6c757d; margin-bottom:8px; font-weight:700; }
+    .employee-form .mandatory-note { background:#fff6f6; border:1px solid #ffd7d7; color:#8a1f1f; border-radius:6px; padding:8px 10px; font-size:13px; }
+</style>
+@endpush
+
+<div class="employee-form">
+    <div class="mandatory-note mb-3">
+        Fields marked with <strong class="text-danger">*</strong> are mandatory. Keep official designation separate from system roles.
+    </div>
+
+    <div class="scope-box mb-3">
+        <strong>{{ $scopeText }}</strong><br>
+        <small>
+            College / Department is auto-filled from the logged-in user's scope. Superuser can choose any scope; Department Admin is locked to own department.
+        </small>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-header">
+            Login & Basic Details
+            <span class="section-help">Phone number is the login ID. One employee can have multiple system roles.</span>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-2 form-group">
+                    <label>Salutation</label>
+                    <select name="salutation" class="form-control">
+                        <option value="">Select</option>
+                        @foreach(['Mr.','Mrs.','Ms.','Dr.','Er.','Prof.'] as $s)
+                            <option value="{{ $s }}" {{ old('salutation', $employee->salutation)==$s ? 'selected' : '' }}>{{ $s }}</option>
+                        @endforeach
+                    </select>
+                </div>
+
+                <div class="col-md-3 form-group">
+                    <label class="required">First Name</label>
+                    <input name="first_name" class="form-control" value="{{ old('first_name', $employee->first_name) }}" required maxlength="100">
+                </div>
+
+                <div class="col-md-3 form-group">
+                    <label>Middle Name</label>
+                    <input name="middle_name" class="form-control" value="{{ old('middle_name', $employee->middle_name) }}" maxlength="100">
+                </div>
+
+                <div class="col-md-4 form-group">
+                    <label>Last Name</label>
+                    <input name="last_name" class="form-control" value="{{ old('last_name', $employee->last_name) }}" maxlength="100">
+                </div>
+
+                <div class="col-md-3 form-group">
+                    <label class="required">Phone / Login ID</label>
+                    <input name="phone" class="form-control" value="{{ old('phone', $employee->phone) }}" required maxlength="20" inputmode="numeric">
+                    <small class="field-help">This phone number is used for login and OTP.</small>
+                </div>
+
+                <div class="col-md-3 form-group">
+                    <label>Email</label>
+                    <input type="email" name="email" class="form-control" value="{{ old('email', $employee->email) }}" maxlength="150">
+                </div>
+
+                <div class="col-md-3 form-group">
+                    <label class="{{ $employee->exists ? '' : 'required' }}">Password {{ $employee->exists ? '(blank = no change)' : '' }}</label>
+                    <input type="password" name="password" class="form-control" {{ $employee->exists ? '' : 'required' }} minlength="6" autocomplete="new-password">
+                    <small class="field-help">For edit page, leave blank if password should not change.</small>
+                </div>
+
+                <div class="col-md-3 form-group">
+                    <label class="required">Roles</label>
+                    <select name="roles[]" class="form-control" multiple size="6" required>
+                        @foreach($roleOptions as $key => $value)
+                            @php
+                                if (is_object($value)) {
+                                    $roleSlug = $value->slug ?: $value->name;
+                                    $roleLabel = $value->display_name ?: ucwords(str_replace('_', ' ', $roleSlug));
+                                } else {
+                                    $roleSlug = is_string($key) ? $key : $value;
+                                    $roleLabel = ucwords(str_replace('_', ' ', $value));
+                                }
+                            @endphp
+                            <option value="{{ $roleSlug }}" {{ in_array($roleSlug, $selectedRoles) ? 'selected' : '' }}>
+                                {{ $roleLabel }}
+                            </option>
+                        @endforeach
+                    </select>
+                    <small class="field-help">Use Ctrl key to select multiple roles. Example: Employee + Storekeeper.</small>
+                </div>
+
+                <div class="col-md-3 form-group">
+                    <label>Photo</label>
+                    <input type="file" name="photo" class="form-control-file" accept="image/*">
+                    <small class="field-help">Recommended small passport-size image.</small>
+                    @if($employee->photo_url)
+                        <img src="{{ $employee->photo_url }}" class="photo-thumb mt-2" alt="Employee Photo">
+                    @endif
+                </div>
+
+                <div class="col-md-3 form-group pt-4">
+                    <label class="mb-0">
+                        <input type="checkbox" name="is_active" value="1" {{ old('is_active', optional($employee->user)->is_active ?? true) ? 'checked' : '' }}>
+                        Login Active
+                    </label>
+                    <small class="field-help">Uncheck only when login should be blocked.</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-header">
+            Service Details
+            <span class="section-help">Official posting, designation and job information.</span>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-3 form-group">
+                    <label>Employee Code</label>
+                    <input name="employee_code" class="form-control" value="{{ old('employee_code', $employee->employee_code) }}" maxlength="50">
+                </div>
+
+                <div class="col-md-3 form-group">
+                    <label class="required">College / Directorate</label>
+
+                    @if(!$canChooseCollege)
+                        <input type="hidden" name="college_id" value="{{ $selectedCollegeId }}">
+                    @endif
+
+                    <select id="college_id" name="{{ $canChooseCollege ? 'college_id' : 'college_id_disabled' }}" class="form-control {{ $canChooseCollege ? '' : 'scope-locked' }}" {{ $canChooseCollege ? '' : 'disabled' }} required>
+                        <option value="">Select</option>
+                        @foreach($colleges as $c)
+                            <option value="{{ $c->id }}" {{ (string)$selectedCollegeId === (string)$c->id ? 'selected' : '' }}>
+                                {{ $c->name }}
+                            </option>
+                        @endforeach
+                    </select>
+                    <small class="field-help">For DEE, select Directorate of Extension Education from Colleges table.</small>
+                </div>
+
+                <div class="col-md-3 form-group">
+                    <label class="required">Department / Office / KVK</label>
+
+                    @if(!$canChooseDepartment)
+                        <input type="hidden" name="department_id" value="{{ $selectedDepartmentId }}">
+                    @endif
+
+                    <select id="department_id" name="{{ $canChooseDepartment ? 'department_id' : 'department_id_disabled' }}" class="form-control {{ $canChooseDepartment ? '' : 'scope-locked' }}" {{ $canChooseDepartment ? '' : 'disabled' }} required>
+                        <option value="">Select</option>
+                        @foreach($departments as $d)
+                            <option value="{{ $d->id }}" data-college="{{ $d->college_id }}" {{ (string)$selectedDepartmentId === (string)$d->id ? 'selected' : '' }}>
+                                {{ $d->name }}{{ $d->place ? ' - '.$d->place : '' }}
+                            </option>
+                        @endforeach
+                    </select>
+                    <small class="field-help">Department Admin is locked to own department.</small>
+                </div>
+
+                <div class="col-md-3 form-group">
+                    <label>Internal Section</label>
+                    <select name="section_id" class="form-control">
+                        <option value="">Select</option>
+                        @foreach($sections as $s)
+                            <option value="{{ $s->id }}" {{ old('section_id', $employee->section_id)==$s->id ? 'selected' : '' }}>
+                                {{ $s->name }}
+                            </option>
+                        @endforeach
+                    </select>
+                </div>
+
+                <div class="col-md-3 form-group">
+                    <label>Room No.</label>
+                    <input name="room_no" class="form-control" value="{{ old('room_no', $employee->room_no) }}" maxlength="50">
+                </div>
+
+                <div class="col-md-4 form-group">
+                    <label>Designation Master</label>
+                    <select name="designation_id" class="form-control">
+                        <option value="">Select</option>
+                        @foreach($designations as $d)
+                            <option value="{{ $d->id }}" {{ old('designation_id', $employee->designation_id)==$d->id ? 'selected' : '' }}>
+                                {{ $d->name }} {{ $d->cadre ? '('.$d->cadre.')' : '' }}
+                            </option>
+                        @endforeach
+                    </select>
+                    <small class="field-help">Choose official designation. If not available, use manual designation.</small>
+                </div>
+
+                <div class="col-md-4 form-group">
+                    <label>Manual Designation</label>
+                    <input name="manual_designation" class="form-control" value="{{ old('manual_designation', $employee->manual_designation) }}" placeholder="Use only if not in master" maxlength="150">
+                    <small class="field-help">Designation is official post. Role is software permission.</small>
+                </div>
+
+                <div class="col-md-4 form-group">
+                    <label class="required">Job Type</label>
+                    <select name="job_type" class="form-control" required>
+                        <option value="">Select</option>
+                        @foreach(['Permanent','Adhoc','Temporary','Daily Wages'] as $j)
+                            <option value="{{ $j }}" {{ old('job_type', $employee->job_type)==$j ? 'selected' : '' }}>{{ $j }}</option>
+                        @endforeach
+                    </select>
+                </div>
+
+                <div class="col-md-3 form-group">
+                    <label class="required">DOB</label>
+                    <input type="date" id="dob" name="date_of_birth" class="form-control" value="{{ old('date_of_birth', $safeDate($employee->date_of_birth)) }}" required>
+                </div>
+
+                <div class="col-md-3 form-group">
+                    <label class="required">DOJ</label>
+                    <input type="date" id="doj" name="date_of_joining" class="form-control" value="{{ old('date_of_joining', $safeDate($employee->date_of_joining)) }}" required>
+                </div>
+
+                <div class="col-md-2 form-group">
+                    <label>Retirement Age</label>
+                    <input type="number" id="retirement_age" name="retirement_age" class="form-control" value="{{ old('retirement_age', $employee->retirement_age ?: 60) }}" min="18" max="75">
+                </div>
+
+                <div class="col-md-4 form-group">
+                    <label>Manual Retirement Date</label>
+                    <input type="date" name="manual_retirement_date" class="form-control" value="{{ old('manual_retirement_date', $safeDate($employee->manual_retirement_date)) }}">
+                    <small class="field-help">Auto date can be calculated from DOB; manual date will override.</small>
+                </div>
+
+                <div class="col-md-4 form-group">
+                    <label>Manual Annual Increment Date</label>
+                    <input type="date" name="manual_increment_date" class="form-control" value="{{ old('manual_increment_date', $safeDate($employee->manual_increment_date)) }}">
+                </div>
+
+                <div class="col-md-4 form-group">
+                    <label>Increment Remarks</label>
+                    <input name="increment_remarks" class="form-control" value="{{ old('increment_remarks', $employee->increment_remarks) }}" maxlength="255">
+                </div>
+
+                <div class="col-md-4 form-group">
+                    <label class="required">Status</label>
+                    <select name="status" class="form-control" required>
+                        @foreach(['Active','Retired','Transferred','Inactive'] as $st)
+                            <option value="{{ $st }}" {{ old('status', $employee->status ?: 'Active')==$st ? 'selected' : '' }}>{{ $st }}</option>
+                        @endforeach
+                    </select>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-header">
+            Identity & Salary Details
+            <span class="section-help">Keep official numbers as per service record.</span>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-3 form-group">
+                    <label>GPF No.</label>
+                    <input name="gpf_no" class="form-control" value="{{ old('gpf_no', $employee->gpf_no) }}" maxlength="50">
+                </div>
+                <div class="col-md-3 form-group">
+                    <label>NPS No.</label>
+                    <input name="nps_no" class="form-control" value="{{ old('nps_no', $employee->nps_no) }}" maxlength="50">
+                </div>
+                <div class="col-md-3 form-group">
+                    <label>PAN No.</label>
+                    <input name="pan_no" class="form-control text-uppercase" value="{{ old('pan_no', $employee->pan_no) }}" maxlength="10">
+                </div>
+                <div class="col-md-3 form-group">
+                    <label>Aadhaar No.</label>
+                    <input name="aadhaar_no" class="form-control" value="{{ old('aadhaar_no', $employee->aadhaar_no) }}" maxlength="12" inputmode="numeric">
+                </div>
+                <div class="col-md-4 form-group">
+                    <label>Salary Account No.</label>
+                    <input name="salary_account_no" class="form-control" value="{{ old('salary_account_no', $employee->salary_account_no) }}" maxlength="40">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-header">
+            Address
+            <span class="section-help">PIN can auto-fill city/state/country when service is available.</span>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-6 form-group">
+                    <label>Address Line 1</label>
+                    <input name="address_line_1" class="form-control" value="{{ old('address_line_1', $employee->address_line_1) }}" maxlength="255">
+                </div>
+                <div class="col-md-6 form-group">
+                    <label>Address Line 2</label>
+                    <input name="address_line_2" class="form-control" value="{{ old('address_line_2', $employee->address_line_2) }}" maxlength="255">
+                </div>
+                <div class="col-md-3 form-group">
+                    <label>PIN / ZIP</label>
+                    <input id="zip" name="zip" class="form-control" value="{{ old('zip', $employee->zip) }}" maxlength="10" inputmode="numeric">
+                    <small id="pin-msg" class="field-help"></small>
+                </div>
+                <div class="col-md-3 form-group">
+                    <label>City</label>
+                    <input id="manual_city" name="manual_city" class="form-control" value="{{ old('manual_city', $employee->manual_city) }}" maxlength="100">
+                </div>
+                <div class="col-md-3 form-group">
+                    <label>State</label>
+                    <input id="manual_state" name="manual_state" class="form-control" value="{{ old('manual_state', $employee->manual_state) }}" maxlength="100">
+                </div>
+                <div class="col-md-3 form-group">
+                    <label>Country</label>
+                    <input id="manual_country" name="manual_country" class="form-control" value="{{ old('manual_country', $employee->manual_country ?: 'India') }}" maxlength="100">
+                </div>
+                <div class="col-md-12 form-group">
+                    <label>Remarks</label>
+                    <textarea name="remarks" class="form-control" rows="3">{{ old('remarks', $employee->remarks) }}</textarea>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
-</div></div>
-
-<div class="card mb-3"><div class="card-header">Service Details</div><div class="card-body">
-<div class="row">
-    <div class="col-md-3 form-group"><label>Employee Code</label><input name="employee_code" class="form-control" value="{{ old('employee_code', $employee->employee_code) }}"></div>
-    <div class="col-md-3 form-group"><label>College / Directorate</label><select id="college_id" name="college_id" class="form-control"><option value="">Select</option>@foreach($colleges as $c)<option value="{{ $c->id }}" {{ old('college_id', $employee->college_id)==$c->id?'selected':'' }}>{{ $c->name }}</option>@endforeach</select></div>
-    <div class="col-md-3 form-group"><label>Department / Office / KVK</label><select id="department_id" name="department_id" class="form-control"><option value="">Select</option>@foreach($departments as $d)<option value="{{ $d->id }}" data-college="{{ $d->college_id }}" {{ old('department_id', $employee->department_id)==$d->id?'selected':'' }}>{{ $d->name }}{{ $d->place ? ' - '.$d->place : '' }}</option>@endforeach</select></div>
-    <div class="col-md-3 form-group"><label>Internal Section</label><select name="section_id" class="form-control"><option value="">Select</option>@foreach($sections as $s)<option value="{{ $s->id }}" {{ old('section_id', $employee->section_id)==$s->id?'selected':'' }}>{{ $s->name }}</option>@endforeach</select></div>
-    <div class="col-md-3 form-group"><label>Legacy Directorate</label><select name="directorate_id" class="form-control"><option value="">Select</option>@foreach($directorates as $d)<option value="{{ $d->id }}" {{ old('directorate_id', $employee->directorate_id)==$d->id?'selected':'' }}>{{ $d->name }}</option>@endforeach</select></div>
-    <div class="col-md-3 form-group"><label>Room No</label><input name="room_no" class="form-control" value="{{ old('room_no', $employee->room_no) }}"></div>
-    <div class="col-md-4 form-group"><label>Designation Master</label><select name="designation_id" class="form-control"><option value="">Select</option>@foreach($designations as $d)<option value="{{ $d->id }}" {{ old('designation_id', $employee->designation_id)==$d->id?'selected':'' }}>{{ $d->name }} {{ $d->cadre ? '('.$d->cadre.')':'' }}</option>@endforeach</select></div>
-    <div class="col-md-4 form-group"><label>Manual Designation</label><input name="manual_designation" class="form-control" value="{{ old('manual_designation', $employee->manual_designation) }}" placeholder="Use only if not in master"></div>
-    <div class="col-md-4 form-group"><label class="required">Job Type</label><select name="job_type" class="form-control" required>@foreach(['Permanent','Adhoc','Temporary','Daily Wages'] as $j)<option value="{{ $j }}" {{ old('job_type', $employee->job_type)==$j?'selected':'' }}>{{ $j }}</option>@endforeach</select></div>
-    <div class="col-md-3 form-group"><label>DOB</label><input type="date" id="dob" name="date_of_birth" class="form-control" value="{{ old('date_of_birth', optional($employee->date_of_birth)->format('Y-m-d')) }}"></div>
-    <div class="col-md-3 form-group"><label>DOJ</label><input type="date" id="doj" name="date_of_joining" class="form-control" value="{{ old('date_of_joining', optional($employee->date_of_joining)->format('Y-m-d')) }}"></div>
-    <div class="col-md-2 form-group"><label>Retirement Age</label><input type="number" id="retirement_age" name="retirement_age" class="form-control" value="{{ old('retirement_age', $employee->retirement_age ?: 60) }}"></div>
-    <div class="col-md-4 form-group"><label>Manual Retirement Date</label><input type="date" name="manual_retirement_date" class="form-control" value="{{ old('manual_retirement_date', optional($employee->manual_retirement_date)->format('Y-m-d')) }}"><small>Auto date is calculated, but this manual date will override.</small></div>
-    <div class="col-md-4 form-group"><label>Manual Annual Increment Date</label><input type="date" name="manual_increment_date" class="form-control" value="{{ old('manual_increment_date', optional($employee->manual_increment_date)->format('Y-m-d')) }}"></div>
-    <div class="col-md-4 form-group"><label>Increment Remarks</label><input name="increment_remarks" class="form-control" value="{{ old('increment_remarks', $employee->increment_remarks) }}"></div>
-    <div class="col-md-4 form-group"><label>Status</label><select name="status" class="form-control">@foreach(['Active','Retired','Transferred','Inactive'] as $st)<option value="{{ $st }}" {{ old('status', $employee->status)==$st?'selected':'' }}>{{ $st }}</option>@endforeach</select></div>
-</div>
-</div></div>
-
-<div class="card mb-3"><div class="card-header">Identity & Salary Details</div><div class="card-body"><div class="row">
-    <div class="col-md-3 form-group"><label>GPF No.</label><input name="gpf_no" class="form-control" value="{{ old('gpf_no', $employee->gpf_no) }}"></div>
-    <div class="col-md-3 form-group"><label>NPS No.</label><input name="nps_no" class="form-control" value="{{ old('nps_no', $employee->nps_no) }}"></div>
-    <div class="col-md-3 form-group"><label>PAN No.</label><input name="pan_no" class="form-control" value="{{ old('pan_no', $employee->pan_no) }}"></div>
-    <div class="col-md-3 form-group"><label>Aadhaar No.</label><input name="aadhaar_no" class="form-control" value="{{ old('aadhaar_no', $employee->aadhaar_no) }}"></div>
-    <div class="col-md-4 form-group"><label>Salary Account No.</label><input name="salary_account_no" class="form-control" value="{{ old('salary_account_no', $employee->salary_account_no) }}"></div>
-</div></div></div>
-
-<div class="card mb-3"><div class="card-header">Address</div><div class="card-body"><div class="row">
-    <div class="col-md-6 form-group"><label>Address Line 1</label><input name="address_line_1" class="form-control" value="{{ old('address_line_1', $employee->address_line_1) }}"></div>
-    <div class="col-md-6 form-group"><label>Address Line 2</label><input name="address_line_2" class="form-control" value="{{ old('address_line_2', $employee->address_line_2) }}"></div>
-    <div class="col-md-3 form-group"><label>PIN/ZIP</label><input id="zip" name="zip" class="form-control" value="{{ old('zip', $employee->zip) }}"><small id="pin-msg"></small></div>
-    <div class="col-md-3 form-group"><label>City</label><input id="manual_city" name="manual_city" class="form-control" value="{{ old('manual_city', $employee->manual_city) }}"></div>
-    <div class="col-md-3 form-group"><label>State</label><input id="manual_state" name="manual_state" class="form-control" value="{{ old('manual_state', $employee->manual_state) }}"></div>
-    <div class="col-md-3 form-group"><label>Country</label><input id="manual_country" name="manual_country" class="form-control" value="{{ old('manual_country', $employee->manual_country ?: 'India') }}"></div>
-    <div class="col-md-12 form-group"><label>Remarks</label><textarea name="remarks" class="form-control">{{ old('remarks', $employee->remarks) }}</textarea></div>
-</div></div></div>
 
 @push('scripts')
 <script>
-
 function filterDepartments(){
     var collegeId = $('#college_id').val();
     $('#department_id option').each(function(){
         var optCollege = $(this).data('college');
-        if(!$(this).val() || !collegeId || optCollege == collegeId){ $(this).show(); } else { $(this).hide(); }
+        if(!$(this).val() || !collegeId || optCollege == collegeId){
+            $(this).show();
+        } else {
+            $(this).hide();
+        }
     });
+
     var selected = $('#department_id option:selected');
     if(collegeId && selected.val() && selected.data('college') != collegeId){
         $('#department_id').val('');
     }
 }
+
 $('#college_id').on('change', filterDepartments);
 filterDepartments();
 
 $('#zip').on('blur', function(){
     var pin = $(this).val();
     if(pin.length === 6){
-        $('#pin-msg').text('Checking PIN...');
+        $('#pin-msg').text('Checking PIN...').css('color','#6c757d');
         $.get('{{ url('/pincode') }}/' + pin, function(res){
             if(res.success){
                 $('#manual_city').val(res.city);
                 $('#manual_state').val(res.state);
                 $('#manual_country').val(res.country);
-                $('#pin-msg').text('Auto filled from PIN.').css('color','green');
+                $('#pin-msg').text('Auto-filled from PIN.').css('color','green');
             } else {
                 $('#pin-msg').text(res.message).css('color','red');
             }
+        }).fail(function(){
+            $('#pin-msg').text('PIN auto-fill service not available right now.').css('color','#6c757d');
         });
     }
 });

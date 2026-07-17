@@ -1,0 +1,10 @@
+Quick fix if you do not want to replace full app.blade.php:
+
+In resources/views/layouts/app.blade.php, do NOT use:
+    $user->hasActiveCharge('Store Incharge')
+
+Replace it with:
+    $employee && method_exists($employee, 'hasActiveCharge') && $employee->hasActiveCharge('Store Incharge')
+
+Reason:
+    hasActiveCharge() belongs to App\Employee, not App\User.

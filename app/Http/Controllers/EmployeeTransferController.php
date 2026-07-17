@@ -2,81 +2,104 @@
 
 namespace App\Http\Controllers;
 
+use App\College;
 use App\Department;
 use App\Employee;
-use App\EmployeeServiceMovement;
-use App\EmployeeTransfer;
+use App\Support\AccessScope;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Storage;
-use App\Support\AccessScope;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class EmployeeTransferController extends Controller
 {
-    public function __construct()
+    public function create(Employee $employee)
     {
-        $this->middleware(['auth','role:admin,college_admin,department_admin,director']);
+        if (!AccessScope::canTransferEmployee($employee)) {
+            abort(403, 'You are not allowed to transfer this employee.');
+        }
+
+        $colleges = AccessScope::transferDestinationColleges();
+        $departments = AccessScope::transferDestinationDepartments();
+
+        return view('employees.transfer', compact('employee', 'colleges', 'departments'));
     }
 
     public function store(Request $request, Employee $employee)
     {
-        if (!AccessScope::canAccessEmployee($employee)) abort(403);
-        $data = $request->validate([
+        if (!AccessScope::canTransferEmployee($employee)) {
+            abort(403, 'You are not allowed to transfer this employee.');
+        }
+
+        $request->validate([
             'to_college_id' => 'required|exists:colleges,id',
             'to_department_id' => 'required|exists:departments,id',
             'transfer_date' => 'required|date',
             'relieving_date' => 'nullable|date',
             'joining_date' => 'nullable|date',
-            'order_no' => 'nullable|string|max:255',
+            'order_no' => 'nullable|string|max:100',
             'order_date' => 'nullable|date',
-            'order_file' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:4096',
-            'remarks' => 'nullable|string',
+            'remarks' => 'nullable|string|max:1000',
+            'order_file' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:2048',
         ]);
 
-        if (!AccessScope::canAccessDepartment($data['to_department_id'])) abort(403, 'Target department is outside your scope.');
-        $dept = Department::findOrFail($data['to_department_id']);
-        $data['to_college_id'] = $dept->college_id; // keep correct college of selected department
-        $data['employee_id'] = $employee->id;
-        $data['from_college_id'] = $employee->college_id;
-        $data['from_department_id'] = $employee->department_id;
-        $data['created_by'] = Auth::id();
+        $toDepartment = Department::where('id', $request->to_department_id)
+            ->where('college_id', $request->to_college_id)
+            ->firstOrFail();
 
+        $fromCollegeId = $employee->college_id;
+        $fromDepartmentId = $employee->department_id;
+
+        $orderFilePath = null;
         if ($request->hasFile('order_file')) {
-            $data['order_file'] = $request->file('order_file')->store('employee_transfer_orders', 'public');
+            $orderFilePath = $request->file('order_file')->store('employee_transfer_orders', 'public');
         }
 
-        $transfer = EmployeeTransfer::create($data);
+        DB::transaction(function () use ($request, $employee, $fromCollegeId, $fromDepartmentId, $orderFilePath) {
+            if (Schema::hasTable('employee_transfers')) {
+                $data = [
+                    'employee_id' => $employee->id,
+                    'from_college_id' => $fromCollegeId,
+                    'from_department_id' => $fromDepartmentId,
+                    'to_college_id' => $request->to_college_id,
+                    'to_department_id' => $request->to_department_id,
+                    'transfer_date' => $request->transfer_date,
+                    'relieving_date' => $request->relieving_date,
+                    'joining_date' => $request->joining_date,
+                    'order_no' => $request->order_no,
+                    'order_date' => $request->order_date,
+                    'order_file' => $orderFilePath,
+                    'remarks' => $request->remarks,
+                    'created_by' => Auth::id(),
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ];
 
-        $employee->update([
-            'college_id' => $data['to_college_id'],
-            'department_id' => $data['to_department_id'],
-            'status' => 'Active',
-        ]);
+                // Keep only columns that actually exist in your installation.
+                $insert = [];
+                foreach ($data as $key => $value) {
+                    if (Schema::hasColumn('employee_transfers', $key)) {
+                        $insert[$key] = $value;
+                    }
+                }
+                DB::table('employee_transfers')->insert($insert);
+            }
 
-        EmployeeServiceMovement::create([
-            'employee_id' => $employee->id,
-            'movement_type' => 'Transfer',
-            'effective_date' => $data['transfer_date'],
-            'order_no' => $data['order_no'] ?? null,
-            'order_date' => $data['order_date'] ?? null,
-            'document' => $data['order_file'] ?? null,
-            'remarks' => 'Transferred from '.optional($transfer->fromDepartment)->name.' to '.optional($transfer->toDepartment)->name.'. '.$request->remarks,
-            'created_by' => Auth::id(),
-        ]);
+            $employee->college_id = $request->to_college_id;
+            $employee->department_id = $request->to_department_id;
+            if (Schema::hasColumn('employees', 'status')) {
+                $employee->status = 'Active';
+            }
+            $employee->save();
 
-        return redirect()->route('employees.show', $employee)->with('success', 'Employee transferred successfully and transfer history has been saved.');
-    }
+            // Keep login scope in sync with employee current posting.
+            if ($employee->user) {
+                $employee->user->college_id = $request->to_college_id;
+                $employee->user->department_id = $request->to_department_id;
+                $employee->user->save();
+            }
+        });
 
-    public function destroy(Employee $employee, EmployeeTransfer $transfer)
-    {
-        if (!AccessScope::canAccessEmployee($employee)) abort(403);
-        if ($transfer->employee_id != $employee->id) {
-            abort(404);
-        }
-        if ($transfer->order_file) {
-            Storage::disk('public')->delete($transfer->order_file);
-        }
-        $transfer->delete();
-        return redirect()->route('employees.show', $employee)->with('success', 'Transfer record deleted. Current posting is not changed automatically.');
+        return redirect()->route('employees.show', $employee)->with('success', 'Employee transferred successfully.');
     }
 }

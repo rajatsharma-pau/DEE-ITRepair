@@ -41,6 +41,8 @@ class Kernel extends HttpKernel
         'throttle' => \Illuminate\Routing\Middleware\ThrottleRequests::class,
         'verified' => \Illuminate\Auth\Middleware\EnsureEmailIsVerified::class,
         'role' => \App\Http\Middleware\RoleMiddleware::class,
+        'store.view' => \App\Http\Middleware\StoreViewAllowed::class,
+'store.manage' => \App\Http\Middleware\StoreManageOnly::class,
     ];
 
     protected $middlewarePriority = [

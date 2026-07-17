@@ -1,0 +1,28 @@
+Optional but recommended backend hardening.
+Apply these small changes in app/Http/Controllers/RepairRequestController.php so UI hiding is also enforced on submit.
+
+1) In storekeeperAction(), replace this line:
+if (!$user->isRole(['admin','college_admin','department_admin','director','storekeeper'])) abort(403);
+
+with:
+if (!$user->hasRole('superuser') && !$user->hasRole('storekeeper')) abort(403);
+
+2) In programmerAction(), replace this line:
+if (!$user->isRole(['admin','college_admin','department_admin','director','programmer']) && !$isStoreIncharge) abort(403);
+
+with:
+if (!$user->hasRole('superuser') && !$user->hasRole('programmer') && !$user->hasRole('store_incharge') && !$isStoreIncharge) abort(403);
+
+3) In d4Action(), replace this line:
+if (!$user->isRole(['admin','college_admin','department_admin','director','d4_seat'])) abort(403);
+
+with:
+if (!$user->hasRole('superuser') && !$user->hasRole('d4_seat')) abort(403);
+
+4) In updateStatus(), replace this line:
+if (!$user->isRole(['admin','college_admin','department_admin','director'])) abort(403);
+
+with:
+if (!$user->hasRole('superuser') && !$user->hasRole('admin') && !$user->hasRole('director')) abort(403);
+
+This keeps Department Admin view-only on repair detail actions unless they also have Storekeeper / Programmer / D-4 role.

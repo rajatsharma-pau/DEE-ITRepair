@@ -11,7 +11,6 @@ class CreateEmployeesTable extends Migration
         Schema::create('employees', function (Blueprint $table) {
             $table->bigIncrements('id');
             $table->unsignedBigInteger('user_id')->nullable();
-            $table->unsignedBigInteger('directorate_id')->nullable();
             $table->unsignedBigInteger('college_id')->nullable();
             $table->unsignedBigInteger('department_id')->nullable();
             $table->unsignedBigInteger('section_id')->nullable();
@@ -64,7 +63,6 @@ class CreateEmployeesTable extends Migration
             $table->timestamps();
 
             $table->foreign('user_id')->references('id')->on('users')->onDelete('set null');
-            $table->foreign('directorate_id')->references('id')->on('directorates')->onDelete('set null');
             $table->foreign('college_id')->references('id')->on('colleges')->onDelete('set null');
             $table->foreign('department_id')->references('id')->on('departments')->onDelete('set null');
             $table->foreign('section_id')->references('id')->on('sections')->onDelete('set null');

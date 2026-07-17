@@ -4,7 +4,6 @@ namespace App\Http\Controllers;
 
 use App\College;
 use App\Department;
-use App\Directorate;
 use App\StoreItem;
 use App\StoreStockMovement;
 use Illuminate\Http\Request;
@@ -52,7 +51,6 @@ class StoreItemController extends Controller
     {
         $data = $this->validateItem($request);
         $this->authorizeScopeFields($data);
-        $data['directorate_id'] = Directorate::where('short_name','DEE')->value('id');
         $data['current_stock'] = $data['opening_stock'];
         $item = StoreItem::create($data);
         StoreStockMovement::create([

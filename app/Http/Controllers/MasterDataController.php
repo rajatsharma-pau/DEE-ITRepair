@@ -5,7 +5,6 @@ namespace App\Http\Controllers;
 use App\College;
 use App\Department;
 use App\Designation;
-use App\Directorate;
 use App\Employee;
 use App\ProblemTemplate;
 use App\RepairCategory;
@@ -82,14 +81,29 @@ class MasterDataController extends Controller
 
     public function sections()
     {
-        $items = Section::with('directorate')->orderBy('name')->get();
-        $directorates = Directorate::where('is_active',1)->orderBy('name')->get();
-        return view('masters.sections', compact('items','directorates'));
+        $items = Section::with(['college','department'])->orderBy('name')->get();
+        $colleges = College::where('is_active', 1)->orderBy('name')->get();
+        $departments = Department::where('is_active', 1)->orderBy('name')->get();
+        return view('masters.sections', compact('items','colleges','departments'));
     }
 
     public function storeSection(Request $request)
     {
-        $data = $request->validate(['directorate_id'=>'required|exists:directorates,id','name'=>'required|string|max:255','short_name'=>'nullable|string|max:50','is_active'=>'nullable']);
+        $data = $request->validate([
+            'college_id' => 'nullable|exists:colleges,id',
+            'department_id' => 'nullable|exists:departments,id',
+            'name' => 'required|string|max:255',
+            'short_name' => 'nullable|string|max:50',
+            'is_active' => 'nullable'
+        ]);
+
+        if (!empty($data['department_id'])) {
+            $dept = Department::find($data['department_id']);
+            if ($dept) {
+                $data['college_id'] = $dept->college_id;
+            }
+        }
+
         $data['is_active'] = $request->has('is_active');
         Section::create($data);
         return back()->with('success','Section added.');

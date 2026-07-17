@@ -1,0 +1,25 @@
+Optional backend validation hardening for EmployeeController store/update:
+
+Add or verify these rules in the request validation array. This keeps the new red mandatory UI fields aligned with backend validation.
+
+'first_name'      => 'required|string|max:100',
+'phone'           => 'required|string|max:20',
+'roles'           => 'required|array|min:1',
+'roles.*'         => 'required|string|max:50',
+'college_id'      => 'required|integer|exists:colleges,id',
+'department_id'   => 'required|integer|exists:departments,id',
+'job_type'        => 'required|in:Permanent,Adhoc,Temporary,Daily Wages',
+'date_of_birth'   => 'required|date',
+'date_of_joining' => 'required|date',
+'status'          => 'required|in:Active,Retired,Transferred,Inactive',
+
+For create only:
+'password'        => 'required|string|min:6',
+
+For update only:
+'password'        => 'nullable|string|min:6',
+
+Important:
+- Keep scope enforcement from AccessScope in controller.
+- For Department Admin, backend should still force college_id/department_id to logged-in user's scope.
+- Superuser should be allowed to choose any college/department.

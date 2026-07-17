@@ -1,9 +1,12 @@
 <?php
 namespace App;
-use Illuminate\Database\Eloquent\Model;
-class Directorate extends Model
+
+/**
+ * Backward-compatibility alias only.
+ * There is no separate `directorates` table now.
+ * College / Directorate records are stored in the `colleges` table.
+ */
+class Directorate extends College
 {
-    protected $fillable = ['name','short_name','is_active'];
-    public function sections(){ return $this->hasMany(Section::class); }
-    public function employees(){ return $this->hasMany(Employee::class); }
+    protected $table = 'colleges';
 }

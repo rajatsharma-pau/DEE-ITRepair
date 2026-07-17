@@ -2,7 +2,17 @@
 @section('content')
 <div class="card"><div class="card-header">New Store Indent</div><div class="card-body">
 <form method="POST" action="{{ route('store-indents.store') }}">@csrf
-<div class="row"><div class="col-md-3 form-group"><label>Required Date</label><input type="date" name="required_date" class="form-control" value="{{ old('required_date') }}"></div><div class="col-md-9 form-group"><label>Remarks</label><input name="employee_remarks" class="form-control" value="{{ old('employee_remarks') }}"></div></div>
+<div class="row">
+    <div class="col-md-3 form-group">
+        <label>Required Date <span class="text-danger">*</span></label>
+        <input type="date" name="required_date" class="form-control" value="{{ old('required_date', isset($requiredDate) ? $requiredDate : date('Y-m-d')) }}" required>
+        <small class="form-text text-muted">Auto-filled with today's date. You may change it if items are required on another date.</small>
+    </div>
+    <div class="col-md-9 form-group">
+        <label>Remarks</label>
+        <input name="employee_remarks" class="form-control" value="{{ old('employee_remarks') }}">
+    </div>
+</div>
 <table class="table table-bordered" id="itemsTable"><thead><tr><th>Store Item</th><th width="180">Available Stock</th><th width="180">Requested Qty</th><th width="80"></th></tr></thead><tbody>
 <tr>
 <td><select name="store_item_id[]" class="form-control item-select" required><option value="">-- Select --</option>@foreach($items as $item)<option value="{{ $item->id }}" data-stock="{{ $item->current_stock }} {{ $item->unit }}">{{ $item->name }} (Stock: {{ $item->current_stock }} {{ $item->unit }})</option>@endforeach</select></td>

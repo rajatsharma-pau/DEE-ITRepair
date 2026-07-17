@@ -1,0 +1,99 @@
+If you do not want to replace full app/Support/AccessScope.php, paste these methods inside the AccessScope class before the final closing brace.
+
+public static function collegeId($user = null)
+{
+    $user = $user ?: auth()->user();
+
+    if (!$user) {
+        return null;
+    }
+
+    if (isset($user->college_id) && $user->college_id) {
+        return $user->college_id;
+    }
+
+    try {
+        if (method_exists($user, 'employee') && $user->employee && $user->employee->college_id) {
+            return $user->employee->college_id;
+        }
+    } catch (\Exception $e) {
+        // ignore
+    }
+
+    try {
+        if (\Schema::hasTable('user_roles') && \Schema::hasColumn('user_roles', 'college_id')) {
+            $collegeId = \DB::table('user_roles')
+                ->where('user_id', $user->id)
+                ->whereNotNull('college_id')
+                ->value('college_id');
+
+            if ($collegeId) {
+                return $collegeId;
+            }
+        }
+    } catch (\Exception $e) {
+        // ignore
+    }
+
+    return null;
+}
+
+public static function departmentId($user = null)
+{
+    $user = $user ?: auth()->user();
+
+    if (!$user) {
+        return null;
+    }
+
+    if (isset($user->department_id) && $user->department_id) {
+        return $user->department_id;
+    }
+
+    try {
+        if (method_exists($user, 'employee') && $user->employee && $user->employee->department_id) {
+            return $user->employee->department_id;
+        }
+    } catch (\Exception $e) {
+        // ignore
+    }
+
+    try {
+        if (\Schema::hasTable('user_roles') && \Schema::hasColumn('user_roles', 'department_id')) {
+            $departmentId = \DB::table('user_roles')
+                ->where('user_id', $user->id)
+                ->whereNotNull('department_id')
+                ->value('department_id');
+
+            if ($departmentId) {
+                return $departmentId;
+            }
+        }
+    } catch (\Exception $e) {
+        // ignore
+    }
+
+    return null;
+}
+
+public static function college($user = null)
+{
+    $collegeId = self::collegeId($user);
+
+    if (!$collegeId || !\Schema::hasTable('colleges')) {
+        return null;
+    }
+
+    return \DB::table('colleges')->where('id', $collegeId)->first();
+}
+
+public static function department($user = null)
+{
+    $departmentId = self::departmentId($user);
+
+    if (!$departmentId || !\Schema::hasTable('departments')) {
+        return null;
+    }
+
+    return \DB::table('departments')->where('id', $departmentId)->first();
+}

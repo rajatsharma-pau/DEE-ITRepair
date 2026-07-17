@@ -1,0 +1,113 @@
+<?php
+/*
+Use these changes in your Asset controller.
+*/
+
+use App\Support\StoreAccessScope;
+
+public function index(Request $request)
+{
+    StoreAccessScope::assertCanViewStore();
+
+    $query = StoreAccessScope::applyAssetScope(
+        Asset::query(),
+        'department_id',
+        'college_id',
+        'employee_id'
+    );
+
+    if ($request->filled('search')) {
+        $search = trim($request->get('search'));
+        $query->where(function ($q) use ($search) {
+            $q->where('item_name', 'like', '%'.$search.'%')
+              ->orWhere('inventory_no', 'like', '%'.$search.'%')
+              ->orWhere('category', 'like', '%'.$search.'%')
+              ->orWhere('make', 'like', '%'.$search.'%')
+              ->orWhere('model', 'like', '%'.$search.'%');
+        });
+    }
+
+    $assets = $query->orderBy('item_name')->paginate(20)->appends($request->query());
+    $canManageStore = StoreAccessScope::canManageStore();
+
+    return view('assets.index', compact('assets', 'canManageStore'));
+}
+
+public function create()
+{
+    StoreAccessScope::assertCanManageStore();
+    return view('assets.create');
+}
+
+public function store(Request $request)
+{
+    StoreAccessScope::assertCanManageStore();
+
+    $data = $request->validate(array(
+        'category' => 'required|string|max:100',
+        'item_type' => 'nullable|string|max:100',
+        'item_name' => 'required|string|max:255',
+        'inventory_no' => 'nullable|string|max:100',
+        'make' => 'nullable|string|max:100',
+        'model' => 'nullable|string|max:100',
+        'location' => 'nullable|string|max:255',
+        'room_no' => 'nullable|string|max:50',
+        'status' => 'nullable|string|max:50',
+        'employee_id' => 'nullable|integer',
+        'college_id' => 'nullable|integer',
+        'department_id' => 'nullable|integer',
+    ));
+
+    // Storekeeper can add assets only for own department.
+    $data = StoreAccessScope::forceStorekeeperDepartment($data);
+
+    Asset::create($data);
+
+    return redirect()->route('assets.index')->with('success', 'Asset added successfully.');
+}
+
+public function edit($id)
+{
+    $asset = Asset::findOrFail($id);
+    StoreAccessScope::assertCanManageRecord($asset, null, 'department_id', 'college_id');
+
+    return view('assets.edit', compact('asset'));
+}
+
+public function update(Request $request, $id)
+{
+    $asset = Asset::findOrFail($id);
+    StoreAccessScope::assertCanManageRecord($asset, null, 'department_id', 'college_id');
+
+    $data = $request->validate(array(
+        'category' => 'required|string|max:100',
+        'item_type' => 'nullable|string|max:100',
+        'item_name' => 'required|string|max:255',
+        'inventory_no' => 'nullable|string|max:100',
+        'make' => 'nullable|string|max:100',
+        'model' => 'nullable|string|max:100',
+        'location' => 'nullable|string|max:255',
+        'room_no' => 'nullable|string|max:50',
+        'status' => 'nullable|string|max:50',
+        'employee_id' => 'nullable|integer',
+        'college_id' => 'nullable|integer',
+        'department_id' => 'nullable|integer',
+    ));
+
+    // Storekeeper cannot move asset to another department by edit form.
+    $data = StoreAccessScope::forceStorekeeperDepartment($data);
+
+    $asset->update($data);
+
+    return redirect()->route('assets.index')->with('success', 'Asset updated successfully.');
+}
+
+public function destroy($id)
+{
+    $asset = Asset::findOrFail($id);
+    StoreAccessScope::assertCanManageRecord($asset, null, 'department_id', 'college_id');
+
+    $asset->delete();
+
+    return redirect()->route('assets.index')->with('success', 'Asset deleted successfully.');
+}

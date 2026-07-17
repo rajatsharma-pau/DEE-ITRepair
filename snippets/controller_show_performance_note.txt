@@ -1,0 +1,21 @@
+Optional controller performance check for EmployeeController@show:
+
+Make sure EmployeeController@show eager-loads all relations used by the view:
+
+$employee->load([
+    'user',
+    'designation',
+    'section',
+    'college',
+    'department',
+    'serviceMovements.fromDesignation',
+    'serviceMovements.toDesignation',
+    'charges',
+    'transfers.fromCollege',
+    'transfers.fromDepartment',
+    'transfers.toCollege',
+    'transfers.toDepartment',
+    'assets'
+]);
+
+Do not load the old directorate relation if you have removed the directorates table.

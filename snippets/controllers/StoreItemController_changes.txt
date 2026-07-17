@@ -1,0 +1,75 @@
+Apply these changes in app/Http/Controllers/StoreItemController.php
+
+1) Add this import at the top:
+
+use App\Support\StoreAccessScope;
+
+
+2) In create() method, pass only allowed/default college/department data.
+
+Example:
+
+public function create()
+{
+    if (!StoreAccessScope::canManageStore()) {
+        abort(403, 'Only Storekeeper can add store items.');
+    }
+
+    $colleges = \DB::table('colleges')->orderBy('name')->get();
+    $departments = \DB::table('departments')->orderBy('name')->get();
+
+    return view('store-items.create', compact('colleges', 'departments'));
+}
+
+
+3) In store() method, force storekeeper's own college/department.
+
+Example:
+
+public function store(Request $request)
+{
+    if (!StoreAccessScope::canManageStore()) {
+        abort(403, 'Only Storekeeper can add store items.');
+    }
+
+    $data = $request->validate([
+        'college_id' => 'required|integer',
+        'department_id' => 'required|integer',
+        'item_code' => 'required|string|max:100',
+        'item_name' => 'required|string|max:255',
+        'category' => 'required|string|max:150',
+        'unit' => 'required|string|max:50',
+        'brand' => 'nullable|string|max:150',
+        'opening_stock' => 'required|integer|min:0',
+        'reorder_level' => 'required|integer|min:0',
+        'location' => 'required|string|max:255',
+        'description' => 'nullable|string',
+        'is_active' => 'nullable|boolean',
+    ]);
+
+    // Non-superuser storekeeper cannot select another college/department.
+    $data = StoreAccessScope::forceManageScopeData($data);
+
+    $data['current_stock'] = $data['opening_stock'];
+    $data['is_active'] = $request->has('is_active') ? 1 : 0;
+
+    StoreItem::create($data);
+
+    return redirect()->route('store-items.index')->with('success', 'Store item added successfully.');
+}
+
+
+4) In edit/update/delete/stock in/stock out actions, block Department Admin and wrong-department Storekeeper.
+
+Example:
+
+if (!StoreAccessScope::canManageRow($storeItem)) {
+    abort(403, 'You can manage store items only for your own department.');
+}
+
+
+5) In index(), use view scope, not manage scope.
+
+Example:
+
+$query = StoreAccessScope::applyViewScope(StoreItem::query());

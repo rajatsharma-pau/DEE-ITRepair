@@ -1,0 +1,37 @@
+Paste these methods inside app/Support/AccessScope.php before the final closing brace if you do not want to replace the full file.
+
+public static function canAccessCollege($collegeId, $user = null)
+{
+    $user = $user ?: auth()->user();
+
+    if (!$user || !$collegeId) return false;
+    if (method_exists($user, 'hasRole') && $user->hasRole('superuser')) return true;
+
+    if (method_exists($user, 'hasAnyRole') && $user->hasAnyRole(['admin','college_admin','director','department_admin','storekeeper'])) {
+        return (int) $user->college_id === (int) $collegeId;
+    }
+
+    return false;
+}
+
+public static function canAccessDepartment($departmentId, $user = null)
+{
+    $user = $user ?: auth()->user();
+
+    if (!$user || !$departmentId) return false;
+    if (method_exists($user, 'hasRole') && $user->hasRole('superuser')) return true;
+    if (!\Schema::hasTable('departments')) return false;
+
+    $department = \DB::table('departments')->where('id', $departmentId)->first();
+    if (!$department) return false;
+
+    if (method_exists($user, 'hasRole') && $user->hasRole('department_admin')) {
+        return (int) $user->department_id === (int) $departmentId;
+    }
+
+    if (method_exists($user, 'hasAnyRole') && $user->hasAnyRole(['admin','college_admin','director','storekeeper'])) {
+        return (int) $user->college_id === (int) $department->college_id;
+    }
+
+    return false;
+}

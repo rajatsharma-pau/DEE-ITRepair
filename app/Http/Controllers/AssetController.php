@@ -6,7 +6,6 @@ use App\Asset;
 use App\AssetHistory;
 use App\College;
 use App\Department;
-use App\Directorate;
 use App\Employee;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -88,7 +87,6 @@ class AssetController extends Controller
     {
         $data = $this->validateAsset($request);
         $this->authorizeScopeFields($data);
-        $data['directorate_id'] = Directorate::where('short_name','DEE')->value('id');
         $data = $this->syncEmployeeAllocationFields($data);
         $data['state_date'] = $data['state_date'] ?: date('Y-m-d');
 

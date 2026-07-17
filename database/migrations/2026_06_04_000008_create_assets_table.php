@@ -10,7 +10,6 @@ class CreateAssetsTable extends Migration
     {
         Schema::create('assets', function (Blueprint $table) {
             $table->bigIncrements('id');
-            $table->unsignedBigInteger('directorate_id')->nullable();
             $table->unsignedBigInteger('college_id')->nullable();
             $table->unsignedBigInteger('department_id')->nullable();
             $table->unsignedBigInteger('assigned_to_employee_id')->nullable();
@@ -32,8 +31,6 @@ class CreateAssetsTable extends Migration
             $table->date('state_date')->nullable();
             $table->text('remarks')->nullable();
             $table->timestamps();
-
-            $table->foreign('directorate_id')->references('id')->on('directorates')->onDelete('set null');
             $table->foreign('college_id')->references('id')->on('colleges')->onDelete('set null');
             $table->foreign('department_id')->references('id')->on('departments')->onDelete('set null');
             $table->foreign('assigned_to_employee_id')->references('id')->on('employees')->onDelete('set null');

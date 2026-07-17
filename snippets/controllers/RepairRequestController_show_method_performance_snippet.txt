@@ -1,0 +1,74 @@
+Replace ONLY the show() method in app/Http/Controllers/RepairRequestController.php with this optimized method.
+This avoids loading all employees/vendors on every request view unless the logged-in user can actually use those action forms.
+
+public function show(RepairRequest $repair_request)
+{
+    $this->authorizeView($repair_request);
+
+    $repair_request->load([
+        'employee.college',
+        'employee.department',
+        'college',
+        'department',
+        'category',
+        'asset',
+        'problemTemplate',
+        'assignedTo',
+        'logs.user',
+        'programmer',
+        'storekeeper',
+        'd4Receiver',
+        'proformaGeneratedBy',
+        'estimates.vendor',
+        'estimates.enteredBy',
+        'estimates.programmer',
+        'selectedEstimate.vendor'
+    ]);
+
+    $user = Auth::user();
+    $employee = $user ? $user->employee : null;
+    $isStoreIncharge = $this->employeeHasCharge($employee, 'Store Incharge');
+
+    $isSuperuser = $user && method_exists($user, 'hasRole') && $user->hasRole('superuser');
+    $canStorekeeperAction = $isSuperuser || ($user && method_exists($user, 'hasRole') && $user->hasRole('storekeeper'));
+    $canProgrammerAction = $isSuperuser
+        || ($user && method_exists($user, 'hasRole') && ($user->hasRole('programmer') || $user->hasRole('store_incharge')))
+        || $isStoreIncharge
+        || ($employee && $repair_request->assigned_to_employee_id == $employee->id && in_array($repair_request->current_handler_role, ['programmer','store_incharge']));
+    $canManualUpdate = $isSuperuser || ($user && method_exists($user, 'hasAnyRole') && $user->hasAnyRole(['admin','director']));
+
+    $employees = collect();
+    $programmers = collect();
+    $storeIncharges = collect();
+    $vendors = collect();
+
+    if ($canStorekeeperAction || $canManualUpdate) {
+        $employees = AccessScope::employeesQuery()
+            ->with(['user','activeCharges'])
+            ->orderBy('first_name')
+            ->get();
+    }
+
+    if ($canStorekeeperAction) {
+        $programmers = AccessScope::apply(Employee::whereHas('user', function($q) {
+            $q->where('is_active', 1)->where(function($x) {
+                $x->where('role', 'programmer')
+                  ->orWhereHas('roles', function($r) { $r->where('name', 'programmer')->orWhere('slug', 'programmer'); });
+            });
+        }))->orderBy('first_name')->get();
+
+        $storeIncharges = AccessScope::apply(Employee::whereHas('activeCharges', function($q) {
+            $q->where('charge_name', 'Store Incharge');
+        }))->orderBy('first_name')->get();
+
+        $vendors = Vendor::where('is_active', 1)->orderBy('name')->get();
+    }
+
+    return view('repair_requests.show', [
+        'request' => $repair_request,
+        'employees' => $employees,
+        'programmers' => $programmers,
+        'storeIncharges' => $storeIncharges,
+        'vendors' => $vendors,
+    ]);
+}

@@ -22,62 +22,140 @@ class RepairRequestController extends Controller
         $this->middleware('auth');
     }
 
-    public function index(Request $request)
-    {
-        $user = Auth::user();
-        $employee = $user->employee;
+   public function index(Request $request)
+{
+    $user = Auth::user();
+    $employee = $user ? $user->employee : null;
+    $handler = $request->get('handler');
 
-        $baseQuery = RepairRequest::with(['employee','category','assignedTo','selectedEstimate.vendor']);
-        if (!AccessScope::isEmployeeOnly($user)) {
-            AccessScope::apply($baseQuery);
-        }
-        if ($request->filled('college_id')) $baseQuery->where('college_id', $request->college_id);
-        if ($request->filled('department_id')) $baseQuery->where('department_id', $request->department_id);
-        if ($request->filled('status')) $baseQuery->where('status', $request->status);
-        if ($request->filled('handler')) {
-            if ($request->handler === 'programmer') {
-                $baseQuery->whereIn('current_handler_role', ['programmer', 'store_incharge']);
-            } else {
-                $baseQuery->where('current_handler_role', $request->handler);
-            }
-        }
+    /*
+    |--------------------------------------------------------------------------
+    | Handler guard
+    |--------------------------------------------------------------------------
+    | Programmer must not open Storekeeper queue.
+    | Typo like handler=strorekeeper is invalid.
+    */
+    $allowedHandlers = ['storekeeper', 'programmer', 'd4_seat'];
 
-        $requests = $baseQuery
-            ->when(AccessScope::isEmployeeOnly($user) && $employee, function($q) use ($employee) {
-                $q->where('employee_id', $employee->id);
-            })
-            ->when($user->hasRole('storekeeper') && $employee, function($q) use ($employee) {
-                $q->where(function($x) use ($employee) {
-                    $x->where('assigned_to_employee_id', $employee->id)
-                      ->orWhere('current_handler_role', 'storekeeper')
-                      ->orWhere('status', 'Submitted to Storekeeper');
-                });
-            })
-            ->when($user->hasRole('programmer') && $employee, function($q) use ($employee) {
-                $q->where(function($x) use ($employee) {
-                    $x->where('assigned_to_employee_id', $employee->id)
-                      ->orWhere('current_handler_role', 'programmer');
-                });
-            })
-            ->when($this->employeeHasCharge($employee, 'Store Incharge'), function($q) use ($employee) {
-                $q->where(function($x) use ($employee) {
-                    $x->where('assigned_to_employee_id', $employee->id)
-                      ->orWhere('current_handler_role', 'store_incharge');
-                });
-            })
-            ->when($user->hasRole('d4_seat') && $employee, function($q) use ($employee) {
-                $q->where(function($x) use ($employee) {
-                    $x->where('assigned_to_employee_id', $employee->id)
-                      ->orWhere('current_handler_role', 'd4_seat')
-                      ->orWhereIn('manual_sanction_status', ['Submitted to D-4','Received at D-4']);
-                });
-            })
-            ->latest()->paginate(20);
-
-        $colleges = AccessScope::colleges();
-        $departments = AccessScope::departments();
-        return view('repair_requests.index', compact('requests','colleges','departments')); 
+    if ($handler && !in_array($handler, $allowedHandlers, true)) {
+        return redirect()
+            ->route('repair-requests.index')
+            ->with('error', 'Invalid request queue selected.');
     }
+
+    if ($handler === 'storekeeper' && !$user->hasAnyRole(['superuser', 'storekeeper'])) {
+        abort(403, 'Only Storekeeper can view the Storekeeper pending queue.');
+    }
+
+    if ($handler === 'programmer') {
+        $isStoreIncharge = $employee && $this->employeeHasCharge($employee, 'Store Incharge');
+
+        if (!$user->hasAnyRole(['superuser', 'programmer']) && !$isStoreIncharge) {
+            abort(403, 'Only Programmer / Store Incharge can view pending verification.');
+        }
+    }
+
+    if ($handler === 'd4_seat' && !$user->hasAnyRole(['superuser', 'd4_seat'])) {
+        abort(403, 'Only D-4 Seat can view D-4 pending files.');
+    }
+
+    $baseQuery = RepairRequest::with([
+        'employee',
+        'category',
+        'assignedTo',
+        'selectedEstimate.vendor'
+    ]);
+
+    /*
+    |--------------------------------------------------------------------------
+    | Normal access scope
+    |--------------------------------------------------------------------------
+    | Superuser should see all on /repair-requests.
+    | Do not auto-filter just because the same user is also Programmer.
+    */
+    if (AccessScope::isEmployeeOnly($user)) {
+        if ($employee) {
+            $baseQuery->where('employee_id', $employee->id);
+        } else {
+            $baseQuery->whereRaw('1 = 0');
+        }
+    } else {
+        AccessScope::apply($baseQuery);
+    }
+
+    if ($request->filled('college_id')) {
+        $baseQuery->where('college_id', $request->college_id);
+    }
+
+    if ($request->filled('department_id')) {
+        $baseQuery->where('department_id', $request->department_id);
+    }
+
+    if ($request->filled('status')) {
+        $baseQuery->where('status', $request->status);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Handler filters
+    |--------------------------------------------------------------------------
+    | These filters apply only when handler is selected.
+    */
+    if ($handler === 'programmer') {
+        $baseQuery->whereIn('current_handler_role', ['programmer', 'store_incharge']);
+
+        // For Programmer-only user, keep only requests assigned to him OR his handler queue.
+        // For Superuser, AccessScope normally allows all, but this filter still keeps only verification queue.
+        if (!$user->hasRole('superuser') && $employee) {
+            $baseQuery->where(function ($q) use ($employee) {
+                $q->where('assigned_to_employee_id', $employee->id)
+                  ->orWhereIn('current_handler_role', ['programmer', 'store_incharge']);
+            });
+        }
+    } elseif ($handler === 'storekeeper') {
+        $baseQuery->where(function ($q) {
+            $q->where('current_handler_role', 'storekeeper')
+              ->orWhere('status', 'Submitted to Storekeeper');
+        });
+
+        if (!$user->hasRole('superuser') && $employee) {
+            $baseQuery->where(function ($q) use ($employee) {
+                $q->where('assigned_to_employee_id', $employee->id)
+                  ->orWhere('current_handler_role', 'storekeeper')
+                  ->orWhere('status', 'Submitted to Storekeeper');
+            });
+        }
+    } elseif ($handler === 'd4_seat') {
+        $baseQuery->where(function ($q) {
+            $q->where('current_handler_role', 'd4_seat')
+              ->orWhereIn('manual_sanction_status', [
+                  'Submitted to D-4',
+                  'Received at D-4'
+              ]);
+        });
+
+        if (!$user->hasRole('superuser') && $employee) {
+            $baseQuery->where(function ($q) use ($employee) {
+                $q->where('assigned_to_employee_id', $employee->id)
+                  ->orWhere('current_handler_role', 'd4_seat')
+                  ->orWhereIn('manual_sanction_status', [
+                      'Submitted to D-4',
+                      'Received at D-4'
+                  ]);
+            });
+        }
+    }
+
+    $requests = $baseQuery
+        ->latest()
+        ->paginate(20)
+        ->appends($request->query());
+
+    $colleges = AccessScope::colleges();
+    $departments = AccessScope::departments();
+
+    return view('repair_requests.index', compact('requests', 'colleges', 'departments'));
+}
 
 
     public function create()
@@ -121,8 +199,25 @@ class RepairRequestController extends Controller
     public function store(Request $request)
     {
         $user = Auth::user();
-        $currentEmployee = $user->employee;
-        $employeeId = AccessScope::isEmployeeOnly($user) ? optional($currentEmployee)->id : $request->employee_id;
+        $currentEmployee = $user ? $user->employee : null;
+
+        /*
+         * Auto-fill employee for request creation.
+         *
+         * This is needed when logged-in users have more than one role, for example:
+         * Department Admin + Employee, Storekeeper + Employee, Programmer + Employee.
+         * The create form may not send employee_id, so we default to the logged-in user's
+         * linked employee record. Employee-only users are always forced to their own record.
+         */
+        if (AccessScope::isEmployeeOnly($user) && $currentEmployee) {
+            $request->merge([
+                'employee_id' => $currentEmployee->id,
+            ]);
+        } elseif (!$request->filled('employee_id') && $currentEmployee) {
+            $request->merge([
+                'employee_id' => $currentEmployee->id,
+            ]);
+        }
 
         $data = $request->validate([
             'employee_id' => 'nullable|exists:employees,id',
@@ -138,6 +233,7 @@ class RepairRequestController extends Controller
             'attachment' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:4096',
         ]);
 
+        $employeeId = isset($data['employee_id']) ? $data['employee_id'] : null;
         $data['employee_id'] = $employeeId;
         $requestingEmployee = Employee::find($employeeId);
         if ($requestingEmployee && !AccessScope::canAccessEmployee($requestingEmployee, $user)) {
@@ -206,31 +302,83 @@ class RepairRequestController extends Controller
 
         return redirect()->route('repair-requests.show', $requestModel)->with('success', 'Request submitted. It has gone to Storekeeper first.');
     }
+public function show(RepairRequest $repair_request)
+{
+    $this->authorizeView($repair_request);
 
-    public function show(RepairRequest $repair_request)
-    {
-        $this->authorizeView($repair_request);
-        $repair_request->load([
-            'employee','category','asset','problemTemplate','assignedTo','logs.user','programmer','storekeeper',
-            'd4Receiver','proformaGeneratedBy','estimates.vendor','estimates.enteredBy','estimates.programmer',
-            'selectedEstimate.vendor'
-        ]);
-        $employees = AccessScope::employeesQuery()->with(['user','activeCharges'])->orderBy('first_name')->get();
-        $programmers = AccessScope::apply(Employee::whereHas('user', function($q){
-            $q->where('is_active',1)->where(function($x){
-                $x->where('role','programmer')
-                  ->orWhereHas('roles', function($r){ $r->where('name','programmer'); });
+    $repair_request->load([
+        'employee.college',
+        'employee.department',
+        'college',
+        'department',
+        'category',
+        'asset',
+        'problemTemplate',
+        'assignedTo',
+        'logs.user',
+        'programmer',
+        'storekeeper',
+        'd4Receiver',
+        'proformaGeneratedBy',
+        'estimates.vendor',
+        'estimates.enteredBy',
+        'estimates.programmer',
+        'selectedEstimate.vendor'
+    ]);
+
+    $user = Auth::user();
+    $employee = $user ? $user->employee : null;
+    $isStoreIncharge = $this->employeeHasCharge($employee, 'Store Incharge');
+
+    $isSuperuser = $user && method_exists($user, 'hasRole') && $user->hasRole('superuser');
+    $canStorekeeperAction = $isSuperuser || ($user && method_exists($user, 'hasRole') && $user->hasRole('storekeeper'));
+    $canProgrammerAction = $isSuperuser
+        || ($user && method_exists($user, 'hasRole') && ($user->hasRole('programmer') || $user->hasRole('store_incharge')))
+        || $isStoreIncharge
+        || ($employee && $repair_request->assigned_to_employee_id == $employee->id && in_array($repair_request->current_handler_role, ['programmer','store_incharge']));
+    $canManualUpdate = $isSuperuser || ($user && method_exists($user, 'hasAnyRole') && $user->hasAnyRole(['admin','director']));
+
+    $employees = collect();
+    $programmers = collect();
+    $storeIncharges = collect();
+    $vendors = collect();
+
+    if ($canStorekeeperAction || $canManualUpdate) {
+        $employees = AccessScope::employeesQuery()
+            ->with(['user','activeCharges'])
+            ->orderBy('first_name')
+            ->get();
+    }
+
+    if ($canStorekeeperAction) {
+        $programmers = AccessScope::apply(Employee::whereHas('user', function($q) {
+            $q->where('is_active', 1)->where(function($x) {
+                $x->where('role', 'programmer')
+                  ->orWhereHas('roles', function($r) { $r->where('name', 'programmer')->orWhere('slug', 'programmer'); });
             });
         }))->orderBy('first_name')->get();
-        $storeIncharges = AccessScope::apply(Employee::whereHas('activeCharges', function($q){ $q->where('charge_name','Store Incharge'); }))->orderBy('first_name')->get();
-        $vendors = Vendor::where('is_active',1)->orderBy('name')->get();
-        return view('repair_requests.show', ['request' => $repair_request, 'employees' => $employees, 'programmers' => $programmers, 'storeIncharges' => $storeIncharges, 'vendors' => $vendors]);
+
+        $storeIncharges = AccessScope::apply(Employee::whereHas('activeCharges', function($q) {
+            $q->where('charge_name', 'Store Incharge');
+        }))->orderBy('first_name')->get();
+
+        $vendors = Vendor::where('is_active', 1)->orderBy('name')->get();
     }
+
+    return view('repair_requests.show', [
+        'request' => $repair_request,
+        'employees' => $employees,
+        'programmers' => $programmers,
+        'storeIncharges' => $storeIncharges,
+        'vendors' => $vendors,
+    ]);
+}
 
     public function storekeeperAction(Request $request, RepairRequest $repair_request)
     {
         $user = Auth::user();
-        if (!$user->isRole(['admin','college_admin','department_admin','director','storekeeper'])) abort(403);
+        if (!$user->hasRole('superuser') && !$user->hasRole('storekeeper')) abort(403);
+
         if (!AccessScope::canAccessDepartment($repair_request->department_id, $user)) abort(403);
 
         $data = $request->validate([
@@ -370,7 +518,8 @@ class RepairRequestController extends Controller
         $user = Auth::user();
         $employee = $user->employee;
         $isStoreIncharge = $this->employeeHasCharge($employee, 'Store Incharge');
-        if (!$user->isRole(['admin','college_admin','department_admin','director','programmer']) && !$isStoreIncharge) abort(403);
+        if (!$user->hasRole('superuser') && !$user->hasRole('programmer') && !$user->hasRole('store_incharge') && !$isStoreIncharge) abort(403);
+
         if (!AccessScope::canAccessDepartment($repair_request->department_id, $user)) abort(403);
         $verifierLabel = $isStoreIncharge && !$user->hasRole('programmer') ? 'Store Incharge' : 'Programmer';
 
@@ -436,7 +585,7 @@ class RepairRequestController extends Controller
     public function d4Action(Request $request, RepairRequest $repair_request)
     {
         $user = Auth::user();
-        if (!$user->isRole(['admin','college_admin','department_admin','director','d4_seat'])) abort(403);
+if (!$user->isRole(['admin','college_admin','department_admin','director','d4_seat'])) abort(403);
         if (!AccessScope::canAccessDepartment($repair_request->department_id, $user)) abort(403);
 
         $data = $request->validate([
@@ -468,7 +617,7 @@ class RepairRequestController extends Controller
     public function updateStatus(Request $request, RepairRequest $repair_request)
     {
         $user = Auth::user();
-        if (!$user->isRole(['admin','college_admin','department_admin','director'])) abort(403);
+if (!$user->hasRole('superuser') && !$user->hasRole('admin') && !$user->hasRole('director')) abort(403);
         if (!AccessScope::canAccessDepartment($repair_request->department_id, $user)) abort(403);
 
         $data = $request->validate([
@@ -667,4 +816,226 @@ class RepairRequestController extends Controller
             'remarks' => $remarks,
         ]);
     }
+
+
+public function saveEstimateAndForward(Request $request, $id)
+{
+    $user = \Auth::user();
+    $employee = $user ? $user->employee : null;
+
+    if (!$user || (!$user->hasRole('superuser') && !$user->hasRole('storekeeper'))) {
+        abort(403, 'Only Storekeeper can save estimate and forward for verification.');
+    }
+
+    $repairRequest = RepairRequest::findOrFail($id);
+
+    /*
+     * Storekeeper can manage only own department unless Superuser.
+     * Keep this backend check even if UI hides fields.
+     */
+    if (!$user->hasRole('superuser')) {
+        if (!$employee || (int)$repairRequest->department_id !== (int)$employee->department_id) {
+            abort(403, 'You can process requests of your own department only.');
+        }
+    }
+
+    /*
+     * Prevent duplicate forward/history if already sent to Programmer/Store Incharge.
+     */
+    if (in_array($repairRequest->current_handler_role, array('programmer', 'store_incharge'))) {
+        return redirect()
+            ->route('repair-requests.show', $repairRequest->id)
+            ->with('error', 'This request is already sent for verification.');
+    }
+
+    $request->validate(array(
+        'vendor_id' => 'required|integer',
+        'estimated_amount' => 'required|numeric|min:0',
+        'estimate_pdf' => 'required|file|mimes:pdf|max:5120',
+        'verification_role' => 'required|in:programmer,store_incharge',
+        'assigned_to_employee_id' => 'nullable|integer',
+        'remarks' => 'nullable|string|max:1000',
+    ));
+
+    \DB::beginTransaction();
+
+    try {
+        $oldStatus = $repairRequest->status ?: '-';
+
+        /*
+         * Upload PDF.
+         */
+        $pdfPath = null;
+        if ($request->hasFile('estimate_pdf')) {
+            $pdfPath = $request->file('estimate_pdf')->store('repair-estimates', 'public');
+        }
+
+        /*
+         * Create estimate.
+         * Replace RepairEstimate with your actual estimate model if different.
+         */
+        $estimate = new RepairEstimate();
+        $estimate->repair_request_id = $repairRequest->id;
+        $estimate->vendor_id = $request->vendor_id;
+        $estimate->estimated_amount = $request->estimated_amount;
+        $estimate->estimate_pdf = $pdfPath;
+        $estimate->remarks = $request->remarks;
+        $estimate->created_by = $user->id;
+        $estimate->save();
+
+        /*
+         * Save estimate + forward in one request update.
+         */
+        $newStatus = $request->verification_role === 'store_incharge'
+            ? 'Sent to Store Incharge for Verification'
+            : 'Sent to Programmer for Verification';
+
+        $repairRequest->selected_estimate_id = $estimate->id;
+        $repairRequest->status = $newStatus;
+        $repairRequest->current_handler_role = $request->verification_role;
+
+        if ($request->filled('assigned_to_employee_id')) {
+            $repairRequest->assigned_to_employee_id = $request->assigned_to_employee_id;
+        }
+
+        $repairRequest->save();
+
+        /*
+         * Create ONLY ONE history entry for this complete action.
+         * If your project has a different history helper, replace this part
+         * with that helper, but keep it as one entry only.
+         */
+        if (method_exists($this, 'addHistory')) {
+            $this->addHistory(
+                $repairRequest,
+                'Storekeeper Action',
+                $oldStatus,
+                $newStatus,
+                'Vendor estimate saved and forwarded for physical/technical verification. '.$request->remarks
+            );
+        } elseif (class_exists('App\\RepairRequestHistory')) {
+            $history = new \App\RepairRequestHistory();
+            $history->repair_request_id = $repairRequest->id;
+            $history->action_type = 'Storekeeper Action';
+            $history->from_status = $oldStatus;
+            $history->to_status = $newStatus;
+            $history->remarks = 'Vendor estimate saved and forwarded for physical/technical verification. '.$request->remarks;
+            $history->created_by = $user->id;
+            $history->save();
+        }
+
+        \DB::commit();
+
+        return redirect()
+            ->route('repair-requests.show', $repairRequest->id)
+            ->with('success', 'Vendor estimate saved and sent for verification.');
+
+    } catch (\Exception $e) {
+        \DB::rollBack();
+
+        return redirect()
+            ->back()
+            ->withInput()
+            ->with('error', 'Estimate could not be saved/forwarded: '.$e->getMessage());
+    }
+}
+
+public function verifyAndReturnToStorekeeper(Request $request, $id)
+{
+    $user = \Auth::user();
+    $employee = $user ? $user->employee : null;
+    $repairRequest = RepairRequest::findOrFail($id);
+
+    $handler = $repairRequest->current_handler_role;
+
+    if (!in_array($handler, array('programmer', 'store_incharge'))) {
+        abort(403, 'This request is not pending with Programmer / Store Incharge.');
+    }
+
+    $assignedToMe = $employee && $repairRequest->assigned_to_employee_id && (int)$repairRequest->assigned_to_employee_id === (int)$employee->id;
+    $isProgrammer = $handler === 'programmer' && $user->hasAnyRole(array('superuser', 'programmer'));
+    $isStoreIncharge = $handler === 'store_incharge' && (
+        $user->hasRole('superuser')
+        || $user->hasRole('store_incharge')
+        || ($employee && method_exists($employee, 'hasActiveCharge') && $employee->hasActiveCharge('Store Incharge'))
+    );
+
+    if (!$assignedToMe && !$isProgrammer && !$isStoreIncharge) {
+        abort(403, 'Only the assigned Programmer / Store Incharge can verify this request.');
+    }
+
+    $request->validate(array(
+        'verification_decision' => 'required|in:ok,not_ok,revised',
+        'verification_remarks' => 'required|string|max:1000',
+    ));
+
+    \DB::beginTransaction();
+
+    try {
+        $oldStatus = $repairRequest->status ?: '-';
+        $verifierLabel = $handler === 'store_incharge' ? 'Store Incharge' : 'Programmer';
+
+        if ($request->verification_decision === 'ok') {
+            $newStatus = $verifierLabel.' Verified Estimate OK';
+        } elseif ($request->verification_decision === 'not_ok') {
+            $newStatus = $verifierLabel.' Estimate Not OK';
+        } else {
+            $newStatus = $verifierLabel.' Requested Revised Estimate';
+        }
+
+        $repairRequest->status = $newStatus;
+        $repairRequest->current_handler_role = 'storekeeper';
+        $repairRequest->assigned_to_employee_id = null;
+
+        if (\Schema::hasColumn('repair_requests', 'verification_remarks')) {
+            $repairRequest->verification_remarks = $request->verification_remarks;
+        }
+
+        if (\Schema::hasColumn('repair_requests', 'verified_by')) {
+            $repairRequest->verified_by = $user->id;
+        }
+
+        if (\Schema::hasColumn('repair_requests', 'verified_at')) {
+            $repairRequest->verified_at = now();
+        }
+
+        $repairRequest->save();
+
+        $historyRemarks = $verifierLabel.' verified the estimate and returned the request to Storekeeper. '.$request->verification_remarks;
+
+        if (method_exists($this, 'addHistory')) {
+            $this->addHistory(
+                $repairRequest,
+                $verifierLabel.' Verification Remarks',
+                $oldStatus,
+                $newStatus,
+                $historyRemarks
+            );
+        } elseif (class_exists('App\\RepairRequestHistory')) {
+            $history = new \App\RepairRequestHistory();
+            $history->repair_request_id = $repairRequest->id;
+            $history->action_type = $verifierLabel.' Verification Remarks';
+            $history->from_status = $oldStatus;
+            $history->to_status = $newStatus;
+            $history->remarks = $historyRemarks;
+            $history->created_by = $user->id;
+            $history->save();
+        }
+
+        \DB::commit();
+
+        return redirect()
+            ->route('repair-requests.show', $repairRequest->id)
+            ->with('success', $verifierLabel.' verification saved and request returned to Storekeeper.');
+
+    } catch (\Exception $e) {
+        \DB::rollBack();
+
+        return redirect()
+            ->back()
+            ->withInput()
+            ->with('error', 'Verification could not be saved: '.$e->getMessage());
+    }
+}
+
 }

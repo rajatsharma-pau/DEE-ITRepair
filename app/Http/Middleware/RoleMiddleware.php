@@ -13,9 +13,7 @@ class RoleMiddleware
             return redirect()->route('login');
         }
 
-        $user = Auth::user();
-
-        if ($user->hasRole('superuser') || $user->hasAnyRole($roles)) {
+        if (Auth::user()->hasAnyRole($roles)) {
             return $next($request);
         }
 

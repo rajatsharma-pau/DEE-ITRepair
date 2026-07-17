@@ -10,13 +10,15 @@ class CreateSectionsTable extends Migration
     {
         Schema::create('sections', function (Blueprint $table) {
             $table->bigIncrements('id');
-            $table->unsignedBigInteger('directorate_id');
+            $table->unsignedBigInteger('college_id')->nullable();
+            $table->unsignedBigInteger('department_id')->nullable();
             $table->string('name');
             $table->string('short_name', 50)->nullable();
             $table->boolean('is_active')->default(true);
             $table->timestamps();
 
-            $table->foreign('directorate_id')->references('id')->on('directorates')->onDelete('cascade');
+            $table->foreign('college_id')->references('id')->on('colleges')->onDelete('set null');
+            $table->foreign('department_id')->references('id')->on('departments')->onDelete('set null');
         });
     }
 

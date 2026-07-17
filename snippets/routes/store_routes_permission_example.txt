@@ -1,0 +1,46 @@
+<?php
+/*
+Add middleware aliases in app/Http/Kernel.php:
+
+'routeMiddleware' => [
+    // existing middleware...
+    'store.view' => \App\Http\Middleware\StoreViewAllowed::class,
+    'store.manage' => \App\Http\Middleware\StoreManageOnly::class,
+]
+
+Then use this route pattern. Adjust controller names/route names according to your app.
+*/
+
+Route::group(array('middleware' => array('auth', 'store.view')), function () {
+
+    // View/list routes: Department Admin can view same department; College Admin can view own college; Storekeeper can view own department.
+    Route::get('/store/items', 'StoreItemController@index')->name('store.items.index');
+    Route::get('/store/items/{id}', 'StoreItemController@show')->name('store.items.show');
+
+    Route::get('/assets', 'AssetController@index')->name('assets.index');
+    Route::get('/assets/{id}', 'AssetController@show')->name('assets.show');
+
+    Route::get('/indents', 'IndentController@index')->name('indents.index');
+    Route::get('/indents/{id}', 'IndentController@show')->name('indents.show');
+});
+
+Route::group(array('middleware' => array('auth', 'store.manage')), function () {
+
+    // Manage routes: only Superuser / Storekeeper reach these routes.
+    // Controller still checks own department by assertCanManageRecord().
+    Route::get('/store/items/create', 'StoreItemController@create')->name('store.items.create');
+    Route::post('/store/items', 'StoreItemController@store')->name('store.items.store');
+    Route::get('/store/items/{id}/edit', 'StoreItemController@edit')->name('store.items.edit');
+    Route::put('/store/items/{id}', 'StoreItemController@update')->name('store.items.update');
+    Route::delete('/store/items/{id}', 'StoreItemController@destroy')->name('store.items.destroy');
+
+    Route::get('/assets/create', 'AssetController@create')->name('assets.create');
+    Route::post('/assets', 'AssetController@store')->name('assets.store');
+    Route::get('/assets/{id}/edit', 'AssetController@edit')->name('assets.edit');
+    Route::put('/assets/{id}', 'AssetController@update')->name('assets.update');
+    Route::get('/assets/{id}/allocate', 'AssetController@allocate')->name('assets.allocate');
+    Route::post('/assets/{id}/allocate', 'AssetController@saveAllocation')->name('assets.allocate.save');
+
+    Route::post('/indents/{id}/issue', 'IndentController@issue')->name('indents.issue');
+    Route::post('/indents/{id}/reject', 'IndentController@reject')->name('indents.reject');
+});

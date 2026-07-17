@@ -5,7 +5,6 @@ use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
 use App\College;
 use App\Department;
-use App\Directorate;
 use App\Section;
 use App\Designation;
 use App\Employee;
@@ -2530,11 +2529,6 @@ JSON
         , true);
 
         DB::transaction(function () use ($employeeRows, $designationRows) {
-            $directorate = Directorate::firstOrCreate(
-                ['short_name' => 'DEE'],
-                ['name' => 'Directorate of Extension Education', 'is_active' => 1]
-            );
-
             $college = College::firstOrCreate(
                 ['name' => 'Directorate of Extension Education'],
                 ['created_at' => now(), 'updated_at' => now()]
@@ -2556,7 +2550,7 @@ JSON
             );
 
             $section = Section::firstOrCreate(
-                ['directorate_id' => $directorate->id, 'name' => 'Administration'],
+                ['college_id' => $college->id, 'department_id' => $department ? $department->id : null, 'name' => 'Administration'],
                 ['short_name' => 'Admin', 'is_active' => 1]
             );
 
@@ -2596,7 +2590,6 @@ JSON
                 $employee = Employee::updateOrCreate(
                     ['employee_code' => $row['employee_code']],
                     [
-                        'directorate_id' => $directorate->id,
                         'college_id' => $college->id,
                         'department_id' => $department ? $department->id : null,
                         'section_id' => $section ? $section->id : null,

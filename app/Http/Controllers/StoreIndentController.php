@@ -40,7 +40,9 @@ class StoreIndentController extends Controller
     public function create()
     {
         $items = AccessScope::apply(StoreItem::where('is_active',1))->orderBy('name')->get();
-        return view('store_indents.create', compact('items'));
+        $requiredDate = date('Y-m-d');
+
+        return view('store_indents.create', compact('items', 'requiredDate'));
     }
 
     public function store(Request $request)
@@ -48,7 +50,7 @@ class StoreIndentController extends Controller
         $employee = Auth::user()->employee;
         if (!$employee) return back()->withErrors('Employee profile not found.');
         $data = $request->validate([
-            'required_date' => 'nullable|date',
+            'required_date' => 'required|date',
             'employee_remarks' => 'nullable|string',
             'store_item_id' => 'required|array',
             'store_item_id.*' => 'required|exists:store_items,id',
@@ -63,7 +65,7 @@ class StoreIndentController extends Controller
                 'college_id' => $employee->college_id,
                 'department_id' => $employee->department_id,
                 'status' => 'Submitted',
-                'required_date' => $data['required_date'],
+                'required_date' => !empty($data['required_date']) ? $data['required_date'] : date('Y-m-d'),
                 'employee_remarks' => $data['employee_remarks'],
             ]);
             foreach ($data['store_item_id'] as $i => $itemId) {

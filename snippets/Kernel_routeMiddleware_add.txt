@@ -1,0 +1,9 @@
+Open: app/Http/Kernel.php
+
+Inside protected $routeMiddleware = [ ... ], add these two lines:
+
+'store.view' => \App\Http\Middleware\StoreViewAllowed::class,
+'store.manage' => \App\Http\Middleware\StoreManageOnly::class,
+
+Use store.view on list/view pages.
+Use store.manage on create/store/edit/update/delete/issue/reject/allocate actions.

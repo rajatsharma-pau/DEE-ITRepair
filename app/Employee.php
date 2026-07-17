@@ -6,7 +6,7 @@ use Illuminate\Support\Facades\Storage;
 class Employee extends Model
 {
     protected $fillable = [
-        'user_id','directorate_id','college_id','department_id','section_id','designation_id','employee_code','salutation','first_name','middle_name','last_name','full_name','phone','email',
+        'user_id','college_id','department_id','section_id','designation_id','employee_code','salutation','first_name','middle_name','last_name','full_name','phone','email',
         'gpf_no','nps_no','pan_no','aadhaar_no','salary_account_no','job_type','date_of_birth','date_of_joining','retirement_age',
         'calculated_retirement_date','manual_retirement_date','final_retirement_date','calculated_increment_date','manual_increment_date','final_increment_date','increment_remarks',
         'manual_designation','photo','room_no','address_line_1','address_line_2','country_id','state_id','city_id','manual_country','manual_state','manual_city','zip','status','remarks'
@@ -17,7 +17,6 @@ class Employee extends Model
     ];
 
     public function user(){ return $this->belongsTo(User::class); }
-    public function directorate(){ return $this->belongsTo(Directorate::class); }
     public function college(){ return $this->belongsTo(College::class); }
     public function department(){ return $this->belongsTo(Department::class); }
     public function section(){ return $this->belongsTo(Section::class); }

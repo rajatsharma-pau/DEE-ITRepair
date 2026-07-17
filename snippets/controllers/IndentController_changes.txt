@@ -1,0 +1,72 @@
+<?php
+/*
+Use these changes in your Indent controller.
+*/
+
+use App\Support\StoreAccessScope;
+
+public function index(Request $request)
+{
+    StoreAccessScope::assertCanViewStore();
+
+    $query = StoreAccessScope::applyIndentScope(
+        Indent::query(),
+        'department_id',
+        'college_id',
+        'employee_id',
+        'user_id'
+    );
+
+    if ($request->filled('status')) {
+        $query->where('status', $request->get('status'));
+    }
+
+    $indents = $query->orderBy('created_at', 'desc')->paginate(20)->appends($request->query());
+    $canManageStore = StoreAccessScope::canManageStore();
+
+    return view('indents.index', compact('indents', 'canManageStore'));
+}
+
+public function show($id)
+{
+    // Use scoped query so Department Admin cannot open another department's indent by URL.
+    $indent = StoreAccessScope::applyIndentScope(
+        Indent::query(),
+        'department_id',
+        'college_id',
+        'employee_id',
+        'user_id'
+    )->where('id', $id)->firstOrFail();
+
+    $canManageStore = StoreAccessScope::canManageRecord($indent, null, 'department_id');
+
+    return view('indents.show', compact('indent', 'canManageStore'));
+}
+
+public function issue(Request $request, $id)
+{
+    $indent = Indent::findOrFail($id);
+    StoreAccessScope::assertCanProcessIndent($indent);
+
+    // issue logic here
+    $indent->status = 'Issued';
+    $indent->issued_by = auth()->id();
+    $indent->issued_at = now();
+    $indent->save();
+
+    return redirect()->back()->with('success', 'Indent issued successfully.');
+}
+
+public function reject(Request $request, $id)
+{
+    $indent = Indent::findOrFail($id);
+    StoreAccessScope::assertCanProcessIndent($indent);
+
+    $indent->status = 'Rejected';
+    $indent->rejection_remarks = $request->get('remarks');
+    $indent->rejected_by = auth()->id();
+    $indent->rejected_at = now();
+    $indent->save();
+
+    return redirect()->back()->with('success', 'Indent rejected successfully.');
+}

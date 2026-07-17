@@ -52,14 +52,61 @@
     @auth
         @php
             $user = Auth::user();
+
+            // Safe employee relation access. Do not call employee methods on App\User.
+            $employee = null;
+            try {
+                $employee = $user->employee;
+            } catch (\Exception $e) {
+                $employee = null;
+            }
+
+            $userHasRole = function ($roles) use ($user) {
+                $roles = is_array($roles) ? $roles : [$roles];
+
+                if (!$user) {
+                    return false;
+                }
+
+                if (method_exists($user, 'hasAnyRole')) {
+                    return $user->hasAnyRole($roles);
+                }
+
+                if (method_exists($user, 'hasRole')) {
+                    foreach ($roles as $r) {
+                        if ($user->hasRole($r)) {
+                            return true;
+                        }
+                    }
+                    return false;
+                }
+
+                $fallbackRole = isset($user->role) ? $user->role : 'employee';
+                return in_array($fallbackRole, $roles);
+            };
+
             $role = method_exists($user, 'roleLabel') ? $user->roleLabel() : ucwords(str_replace('_',' ', ($user->role ?? 'employee')));
-            $employee = method_exists($user, 'employee') ? $user->employee : null;
-            $isAdmin = $user->hasAnyRole(['superuser','admin','college_admin','department_admin']);
-            $isStore = $user->hasAnyRole(['superuser','admin','college_admin','department_admin','storekeeper']);
-            $isTechnical = $user->hasAnyRole(['programmer']) || ($employee && $employee->hasActiveCharge('Store Incharge'));
-            $isD4 = $user->hasAnyRole(['d4_seat']);
-            $deptName = $employee && $employee->department ? $employee->department->name : optional($user->department)->name;
-            $collegeName = $employee && $employee->college ? $employee->college->name : optional($user->college)->name;
+
+            $isEmployeeAdmin = $userHasRole(['superuser','admin','college_admin','department_admin','director']);
+            $canViewStore = $userHasRole(['superuser','admin','college_admin','department_admin','director','storekeeper']);
+            $canManageStore = $userHasRole(['superuser','storekeeper']);
+
+            // IMPORTANT: hasActiveCharge() belongs to Employee, not User.
+            $hasStoreInchargeCharge =   $employee && method_exists($employee, 'hasActiveCharge') && $employee->hasActiveCharge('Store Incharge');
+
+            $canSeeStorekeeperQueue = $userHasRole(['superuser','storekeeper']);
+            $canSeeProgrammerQueue = $userHasRole(['superuser','programmer']) || $hasStoreInchargeCharge;
+            $canSeeD4Queue = $userHasRole(['superuser','d4_seat']);
+
+            $deptName = null;
+            $collegeName = null;
+            try {
+                $deptName = $employee && $employee->department ? $employee->department->name : optional($user->department)->name;
+                $collegeName = $employee && $employee->college ? $employee->college->name : optional($user->college)->name;
+            } catch (\Exception $e) {
+                $deptName = null;
+                $collegeName = null;
+            }
         @endphp
 
         <nav class="navbar navbar-expand-lg navbar-dark dee-topbar">
@@ -78,10 +125,20 @@
                         <div class="dropdown-menu" aria-labelledby="requestsMenu">
                             <a class="dropdown-item" href="{{ route('repair-requests.index') }}">All Repair Requests</a>
                             <a class="dropdown-item" href="{{ route('repair-requests.create') }}">New Repair Request</a>
-                            @if($isStore || $isTechnical || $isD4)
+
+                            @if($canSeeStorekeeperQueue || $canSeeProgrammerQueue || $canSeeD4Queue)
                                 <div class="dropdown-divider"></div>
+                            @endif
+
+                            @if($canSeeStorekeeperQueue)
                                 <a class="dropdown-item" href="{{ route('repair-requests.index', ['handler' => 'storekeeper']) }}">Pending with Storekeeper</a>
+                            @endif
+
+                            @if($canSeeProgrammerQueue)
                                 <a class="dropdown-item" href="{{ route('repair-requests.index', ['handler' => 'programmer']) }}">Verification Pending</a>
+                            @endif
+
+                            @if($canSeeD4Queue)
                                 <a class="dropdown-item" href="{{ route('repair-requests.index', ['handler' => 'd4_seat']) }}">D-4 Manual Files</a>
                             @endif
                         </div>
@@ -91,7 +148,7 @@
                         <a class="nav-link dropdown-toggle" href="#" id="assetsMenu" role="button" data-toggle="dropdown">Assets</a>
                         <div class="dropdown-menu" aria-labelledby="assetsMenu">
                             <a class="dropdown-item" href="{{ route('assets.index') }}">Assets</a>
-                            @if($isStore)
+                            @if($canManageStore)
                                 <a class="dropdown-item" href="{{ route('assets.create') }}">Add Asset</a>
                             @endif
                         </div>
@@ -102,25 +159,27 @@
                         <div class="dropdown-menu" aria-labelledby="storeMenu">
                             <a class="dropdown-item" href="{{ route('store-indents.index') }}">Store Indents</a>
                             <a class="dropdown-item" href="{{ route('store-indents.create') }}">New Indent</a>
-                            @if($isStore)
+
+                            @if($canViewStore)
                                 <div class="dropdown-divider"></div>
                                 <a class="dropdown-item" href="{{ route('store-items.index') }}">Store Stock</a>
-                                <a class="dropdown-item" href="{{ route('store-items.create') }}">Add Stock Item</a>
                                 <a class="dropdown-item" href="{{ route('store-items.index', ['low_stock' => 1]) }}">Low Stock Items</a>
+                            @endif
+
+                            @if($canManageStore)
+                                <a class="dropdown-item" href="{{ route('store-items.create') }}">Add Stock Item</a>
                             @endif
                         </div>
                     </li>
 
-                    @if($isAdmin)
+                    @if($isEmployeeAdmin)
                         <li class="nav-item dropdown">
                             <a class="nav-link dropdown-toggle" href="#" id="adminMenu" role="button" data-toggle="dropdown">Admin</a>
                             <div class="dropdown-menu" aria-labelledby="adminMenu">
                                 <a class="dropdown-item" href="{{ route('employees.index') }}">Employees</a>
                                 <a class="dropdown-item" href="{{ route('employees.create') }}">Add Employee</a>
                                 <div class="dropdown-divider"></div>
-                                <a class="dropdown-item" href="{{ route('masters.colleges') }}">Colleges / Directorates</a>
-                                <a class="dropdown-item" href="{{ route('masters.departments') }}">Departments</a>
-                                <a class="dropdown-item" href="{{ route('masters.designations') }}">Designations</a>
+                                @include('layouts.master_menu_links')
                                 <a class="dropdown-item" href="{{ route('masters.vendors') }}">Vendors</a>
                                 <a class="dropdown-item" href="{{ route('masters.problem-templates') }}">Problem Templates</a>
                                 <a class="dropdown-item" href="{{ route('masters.repair-categories') }}">Repair Categories</a>
@@ -147,6 +206,7 @@
                             </h6>
                             <a class="dropdown-item" href="{{ route('profile.show') }}">My Profile / Photo</a>
                             <div class="dropdown-divider"></div>
+                            <a class="dropdown-item" href="{{ route('profile.password.change') }}">Change Password</a>
                             <a class="dropdown-item" href="{{ route('logout') }}"
                                onclick="event.preventDefault(); document.getElementById('logout-form').submit();">Logout</a>
                             <form id="logout-form" action="{{ route('logout') }}" method="POST" style="display:none;">@csrf</form>

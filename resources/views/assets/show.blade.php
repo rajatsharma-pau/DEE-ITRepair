@@ -1,5 +1,8 @@
 @extends('layouts.app')
 @section('content')
+@php
+    $canManageAsset = isset($canManageAsset) ? $canManageAsset : \App\Support\StoreAccessScope::canManageRow($asset);
+@endphp
 <div class="d-flex justify-content-between mb-3"><h4>Asset Detail</h4><a href="{{ route('assets.index') }}" class="btn btn-secondary">Back</a></div>
 <div class="row">
 <div class="col-md-8"><div class="card mb-3"><div class="card-header">{{ $asset->item_name }}</div><div class="card-body">
@@ -9,13 +12,14 @@
 <tr><th>Serial No</th><td>{{ $asset->serial_no }}</td><th>Configuration</th><td>{{ $asset->configuration }}</td></tr>
 <tr><th>State</th><td><span class="badge badge-info">{{ $asset->asset_state }}</span></td><th>Assigned To</th><td>{{ optional($asset->assignedTo)->display_name ?: '-' }}</td></tr>
 <tr><th>Condition</th><td>{{ $asset->condition_status }}</td><th>Location</th><td>{{ $asset->location }}</td></tr>
+<tr><th>College</th><td>{{ optional($asset->college)->name }}</td><th>Department</th><td>{{ optional($asset->department)->name }}</td></tr>
 <tr><th>Purchase</th><td>{{ optional($asset->purchase_date)->format('d-m-Y') }} / Rs. {{ $asset->purchase_amount }}</td><th>Warranty</th><td>{{ optional($asset->warranty_till)->format('d-m-Y') }}</td></tr>
 <tr><th>Remarks</th><td colspan="3">{{ $asset->remarks }}</td></tr>
 </table>
-@if(Auth::user()->isRole(['admin','college_admin','department_admin','director','storekeeper']))<a href="{{ route('assets.edit',$asset) }}" class="btn btn-warning">Edit</a>@endif
+@if($canManageAsset)<a href="{{ route('assets.edit',$asset) }}" class="btn btn-warning">Edit</a>@endif
 </div></div></div>
 <div class="col-md-4">
-@if(Auth::user()->isRole(['admin','college_admin','department_admin','director','storekeeper']))
+@if($canManageAsset)
 <div class="card mb-3"><div class="card-header">Add Asset Movement</div><div class="card-body">
 <form method="POST" action="{{ route('assets.history.store',$asset) }}">@csrf
 <div class="form-group"><label>New State</label><select name="asset_state" class="form-control" required>@foreach($states as $s)<option value="{{ $s }}">{{ $s }}</option>@endforeach</select></div>
@@ -25,6 +29,8 @@
 <button class="btn btn-success btn-block">Save Movement</button>
 </form>
 </div></div>
+@else
+<div class="alert alert-info">View only. Only the Storekeeper of this department or Superuser can edit or move this asset.</div>
 @endif
 </div>
 </div>

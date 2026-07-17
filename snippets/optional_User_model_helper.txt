@@ -1,0 +1,22 @@
+Optional safety helper only if any other old view still calls $user->hasActiveCharge(...):
+
+Add this method inside app/User.php class:
+
+public function hasActiveCharge($chargeName)
+{
+    $employee = null;
+
+    try {
+        $employee = $this->employee;
+    } catch (\Exception $e) {
+        $employee = null;
+    }
+
+    if (!$employee || !method_exists($employee, 'hasActiveCharge')) {
+        return false;
+    }
+
+    return $employee->hasActiveCharge($chargeName);
+}
+
+This is optional. The main fix is in app.blade.php.

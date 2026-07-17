@@ -5,13 +5,11 @@ use Illuminate\Database\Eloquent\Model;
 class Asset extends Model
 {
     protected $fillable = [
-        'directorate_id','college_id','department_id','assigned_to_employee_id','asset_code','inventory_no','asset_category','item_name','make','model','serial_no','configuration','location',
+        'college_id','department_id','assigned_to_employee_id','asset_code','inventory_no','asset_category','item_name','make','model','serial_no','configuration','location',
         'purchase_date','purchase_amount','purchase_order_no','warranty_till','condition_status','asset_state','state_date','remarks'
     ];
 
     protected $dates = ['purchase_date','warranty_till','state_date'];
-
-    public function directorate(){ return $this->belongsTo(Directorate::class); }
     public function assignedTo(){ return $this->belongsTo(Employee::class, 'assigned_to_employee_id'); }
     public function histories(){ return $this->hasMany(AssetHistory::class)->latest(); }
     public function repairRequests(){ return $this->hasMany(RepairRequest::class); }

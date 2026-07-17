@@ -1,0 +1,23 @@
+// In RepairRequestController@store, place this before $request->validate()
+
+$user = Auth::user();
+$currentEmployee = $user ? $user->employee : null;
+
+if (AccessScope::isEmployeeOnly($user) && $currentEmployee) {
+    $request->merge([
+        'employee_id' => $currentEmployee->id,
+    ]);
+} elseif (!$request->filled('employee_id') && $currentEmployee) {
+    $request->merge([
+        'employee_id' => $currentEmployee->id,
+    ]);
+}
+
+$data = $request->validate([
+    'employee_id' => 'nullable|exists:employees,id',
+    // keep your existing validation rules
+]);
+
+$employeeId = isset($data['employee_id']) ? $data['employee_id'] : null;
+$data['employee_id'] = $employeeId;
+$requestingEmployee = Employee::find($employeeId);

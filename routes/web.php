@@ -13,6 +13,15 @@ Route::get('/departments/by-college/{college}', 'DepartmentController@byCollege'
 Route::get('/repair-categories/{category}/problem-templates', 'RepairRequestController@problemTemplatesByCategory')->name('repair-categories.problem-templates');
 
 Route::group(['middleware' => ['auth']], function () {
+    Route::post(
+    'repair-requests/{id}/estimate-forward',
+    'RepairRequestController@saveEstimateAndForward'
+)->name('repair-requests.estimate-forward');
+Route::post(
+    'repair-requests/{id}/verify-return-storekeeper',
+    'RepairRequestController@verifyAndReturnToStorekeeper'
+)->name('repair-requests.verify-return-storekeeper');
+
     Route::get('profile', 'ProfileController@show')->name('profile.show');
     Route::post('profile/photo', 'ProfileController@updatePhoto')->name('profile.photo.update');
     Route::delete('profile/photo', 'ProfileController@removePhoto')->name('profile.photo.remove');
@@ -63,3 +72,7 @@ Route::group(['middleware' => ['auth']], function () {
     Route::get('masters/routing-rules', 'MasterDataController@routingRules')->name('masters.routing-rules');
     Route::post('masters/routing-rules', 'MasterDataController@storeRoutingRule')->name('masters.routing-rules.store');
 });
+
+
+require __DIR__.'/dee_password_routes.php';
+require __DIR__.'/dee_master_routes.php';
