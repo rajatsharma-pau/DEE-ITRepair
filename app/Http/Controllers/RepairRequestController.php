@@ -813,15 +813,16 @@ public function proforma(RepairRequest $repair_request)
             .$repair_request->id
             .'.pdf';
 
-        return response($mergedContent, 200, [
-            'Content-Type' => 'application/pdf',
-            'Content-Disposition' =>
-                'inline; filename="'.$fileName.'"',
-            'Content-Length' => strlen($mergedContent),
-            'Cache-Control' =>
-                'private, no-store, no-cache, must-revalidate',
-            'Pragma' => 'no-cache',
-        ]);
+       return response($mergedContent, 200, [
+    'Content-Type' => 'application/pdf',
+    'Content-Disposition' =>
+        'inline; filename="'.$fileName.'"',
+    'Content-Length' => strlen($mergedContent),
+    'Content-Language' => 'en',
+    'Cache-Control' =>
+        'private, no-store, no-cache, must-revalidate',
+    'Pragma' => 'no-cache',
+]);
     } catch (\Exception $e) {
         /*
          * Some secured/encrypted PDFs may not be readable by FPDI.

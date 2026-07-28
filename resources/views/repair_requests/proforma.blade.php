@@ -1,8 +1,10 @@
 <!DOCTYPE html>
-<html>
+<html lang="en" translate="no">
 <head>
     <meta charset="utf-8">
-
+<meta http-equiv="Content-Language" content="en">
+<meta name="google" content="notranslate">
+<meta name="robots" content="notranslate">  
     <title>
         Request-cum-Financial Sanction Proforma -
         {{ $request->request_no }}
@@ -158,7 +160,7 @@ strong {
     </style>
 </head>
 
-<body>
+<body class="notranslate" translate="no">
 
 @if(empty($pdfMode))
     <div class="no-print">
