@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\Auth;
 use App\Support\AccessScope;
 use Barryvdh\DomPDF\Facade as PDF;
 use setasign\Fpdi\Fpdi;
+use Illuminate\Support\Facades\Log;
 class RepairRequestController extends Controller
 {
     public function __construct()
@@ -23,140 +24,140 @@ class RepairRequestController extends Controller
         $this->middleware('auth');
     }
 
-   public function index(Request $request)
-{
-    $user = Auth::user();
-    $employee = $user ? $user->employee : null;
-    $handler = $request->get('handler');
+    public function index(Request $request)
+    {
+        $user = Auth::user();
+        $employee = $user ? $user->employee : null;
+        $handler = $request->get('handler');
 
-    /*
+        /*
     |--------------------------------------------------------------------------
     | Handler guard
     |--------------------------------------------------------------------------
     | Programmer must not open Storekeeper queue.
     | Typo like handler=strorekeeper is invalid.
     */
-    $allowedHandlers = ['storekeeper', 'programmer', 'd4_seat'];
+        $allowedHandlers = ['storekeeper', 'programmer', 'd4_seat'];
 
-    if ($handler && !in_array($handler, $allowedHandlers, true)) {
-        return redirect()
-            ->route('repair-requests.index')
-            ->with('error', 'Invalid request queue selected.');
-    }
-
-    if ($handler === 'storekeeper' && !$user->hasAnyRole(['superuser', 'storekeeper'])) {
-        abort(403, 'Only Storekeeper can view the Storekeeper pending queue.');
-    }
-
-    if ($handler === 'programmer') {
-        $isStoreIncharge = $employee && $this->employeeHasCharge($employee, 'Store Incharge');
-
-        if (!$user->hasAnyRole(['superuser', 'programmer']) && !$isStoreIncharge) {
-            abort(403, 'Only Programmer / Store Incharge can view pending verification.');
+        if ($handler && !in_array($handler, $allowedHandlers, true)) {
+            return redirect()
+                ->route('repair-requests.index')
+                ->with('error', 'Invalid request queue selected.');
         }
-    }
 
-    if ($handler === 'd4_seat' && !$user->hasAnyRole(['superuser', 'd4_seat'])) {
-        abort(403, 'Only D-4 Seat can view D-4 pending files.');
-    }
+        if ($handler === 'storekeeper' && !$user->hasAnyRole(['superuser', 'storekeeper'])) {
+            abort(403, 'Only Storekeeper can view the Storekeeper pending queue.');
+        }
 
-    $baseQuery = RepairRequest::with([
-        'employee',
-        'category',
-        'assignedTo',
-        'selectedEstimate.vendor'
-    ]);
+        if ($handler === 'programmer') {
+            $isStoreIncharge = $employee && $this->employeeHasCharge($employee, 'Store Incharge');
 
-    /*
+            if (!$user->hasAnyRole(['superuser', 'programmer']) && !$isStoreIncharge) {
+                abort(403, 'Only Programmer / Store Incharge can view pending verification.');
+            }
+        }
+
+        if ($handler === 'd4_seat' && !$user->hasAnyRole(['superuser', 'd4_seat'])) {
+            abort(403, 'Only D-4 Seat can view D-4 pending files.');
+        }
+
+        $baseQuery = RepairRequest::with([
+            'employee',
+            'category',
+            'assignedTo',
+            'selectedEstimate.vendor'
+        ]);
+
+        /*
     |--------------------------------------------------------------------------
     | Normal access scope
     |--------------------------------------------------------------------------
     | Superuser should see all on /repair-requests.
     | Do not auto-filter just because the same user is also Programmer.
     */
-    if (AccessScope::isEmployeeOnly($user)) {
-        if ($employee) {
-            $baseQuery->where('employee_id', $employee->id);
+        if (AccessScope::isEmployeeOnly($user)) {
+            if ($employee) {
+                $baseQuery->where('employee_id', $employee->id);
+            } else {
+                $baseQuery->whereRaw('1 = 0');
+            }
         } else {
-            $baseQuery->whereRaw('1 = 0');
+            AccessScope::apply($baseQuery);
         }
-    } else {
-        AccessScope::apply($baseQuery);
-    }
 
-    if ($request->filled('college_id')) {
-        $baseQuery->where('college_id', $request->college_id);
-    }
+        if ($request->filled('college_id')) {
+            $baseQuery->where('college_id', $request->college_id);
+        }
 
-    if ($request->filled('department_id')) {
-        $baseQuery->where('department_id', $request->department_id);
-    }
+        if ($request->filled('department_id')) {
+            $baseQuery->where('department_id', $request->department_id);
+        }
 
-    if ($request->filled('status')) {
-        $baseQuery->where('status', $request->status);
-    }
+        if ($request->filled('status')) {
+            $baseQuery->where('status', $request->status);
+        }
 
-    /*
+        /*
     |--------------------------------------------------------------------------
     | Handler filters
     |--------------------------------------------------------------------------
     | These filters apply only when handler is selected.
     */
-    if ($handler === 'programmer') {
-        $baseQuery->whereIn('current_handler_role', ['programmer', 'store_incharge']);
+        if ($handler === 'programmer') {
+            $baseQuery->whereIn('current_handler_role', ['programmer', 'store_incharge']);
 
-        // For Programmer-only user, keep only requests assigned to him OR his handler queue.
-        // For Superuser, AccessScope normally allows all, but this filter still keeps only verification queue.
-        if (!$user->hasRole('superuser') && $employee) {
-            $baseQuery->where(function ($q) use ($employee) {
-                $q->where('assigned_to_employee_id', $employee->id)
-                  ->orWhereIn('current_handler_role', ['programmer', 'store_incharge']);
+            // For Programmer-only user, keep only requests assigned to him OR his handler queue.
+            // For Superuser, AccessScope normally allows all, but this filter still keeps only verification queue.
+            if (!$user->hasRole('superuser') && $employee) {
+                $baseQuery->where(function ($q) use ($employee) {
+                    $q->where('assigned_to_employee_id', $employee->id)
+                        ->orWhereIn('current_handler_role', ['programmer', 'store_incharge']);
+                });
+            }
+        } elseif ($handler === 'storekeeper') {
+            $baseQuery->where(function ($q) {
+                $q->where('current_handler_role', 'storekeeper')
+                    ->orWhere('status', 'Submitted to Storekeeper');
             });
-        }
-    } elseif ($handler === 'storekeeper') {
-        $baseQuery->where(function ($q) {
-            $q->where('current_handler_role', 'storekeeper')
-              ->orWhere('status', 'Submitted to Storekeeper');
-        });
 
-        if (!$user->hasRole('superuser') && $employee) {
-            $baseQuery->where(function ($q) use ($employee) {
-                $q->where('assigned_to_employee_id', $employee->id)
-                  ->orWhere('current_handler_role', 'storekeeper')
-                  ->orWhere('status', 'Submitted to Storekeeper');
+            if (!$user->hasRole('superuser') && $employee) {
+                $baseQuery->where(function ($q) use ($employee) {
+                    $q->where('assigned_to_employee_id', $employee->id)
+                        ->orWhere('current_handler_role', 'storekeeper')
+                        ->orWhere('status', 'Submitted to Storekeeper');
+                });
+            }
+        } elseif ($handler === 'd4_seat') {
+            $baseQuery->where(function ($q) {
+                $q->where('current_handler_role', 'd4_seat')
+                    ->orWhereIn('manual_sanction_status', [
+                        'Submitted to D-4',
+                        'Received at D-4'
+                    ]);
             });
-        }
-    } elseif ($handler === 'd4_seat') {
-        $baseQuery->where(function ($q) {
-            $q->where('current_handler_role', 'd4_seat')
-              ->orWhereIn('manual_sanction_status', [
-                  'Submitted to D-4',
-                  'Received at D-4'
-              ]);
-        });
 
-        if (!$user->hasRole('superuser') && $employee) {
-            $baseQuery->where(function ($q) use ($employee) {
-                $q->where('assigned_to_employee_id', $employee->id)
-                  ->orWhere('current_handler_role', 'd4_seat')
-                  ->orWhereIn('manual_sanction_status', [
-                      'Submitted to D-4',
-                      'Received at D-4'
-                  ]);
-            });
+            if (!$user->hasRole('superuser') && $employee) {
+                $baseQuery->where(function ($q) use ($employee) {
+                    $q->where('assigned_to_employee_id', $employee->id)
+                        ->orWhere('current_handler_role', 'd4_seat')
+                        ->orWhereIn('manual_sanction_status', [
+                            'Submitted to D-4',
+                            'Received at D-4'
+                        ]);
+                });
+            }
         }
+
+        $requests = $baseQuery
+            ->latest()
+            ->paginate(20)
+            ->appends($request->query());
+
+        $colleges = AccessScope::colleges();
+        $departments = AccessScope::departments();
+
+        return view('repair_requests.index', compact('requests', 'colleges', 'departments'));
     }
-
-    $requests = $baseQuery
-        ->latest()
-        ->paginate(20)
-        ->appends($request->query());
-
-    $colleges = AccessScope::colleges();
-    $departments = AccessScope::departments();
-
-    return view('repair_requests.index', compact('requests', 'colleges', 'departments'));
-}
 
 
     public function create()
@@ -167,8 +168,8 @@ class RepairRequestController extends Controller
             return redirect()->route('home')->withErrors('Employee profile not found. Contact admin.');
         }
 
-        $categories = RepairCategory::where('is_active',1)->orderBy('item_group')->orderBy('name')->get();
-        $problemTemplates = ProblemTemplate::where('is_active',1)->orderBy('title')->get();
+        $categories = RepairCategory::where('is_active', 1)->orderBy('item_group')->orderBy('name')->get();
+        $problemTemplates = ProblemTemplate::where('is_active', 1)->orderBy('title')->get();
         $employees = AccessScope::employeesQuery()->orderBy('first_name')->get();
 
         // Employee sees only assets allocated to him/her. Storekeeper/admin/director can select employee first.
@@ -181,19 +182,19 @@ class RepairRequestController extends Controller
             $assets = collect();
         }
 
-        return view('repair_requests.create', compact('categories','assets','employees','employee','problemTemplates'));
+        return view('repair_requests.create', compact('categories', 'assets', 'employees', 'employee', 'problemTemplates'));
     }
 
     public function problemTemplatesByCategory(RepairCategory $category)
     {
-        $items = ProblemTemplate::where('is_active',1)
-            ->where(function($q) use ($category) {
+        $items = ProblemTemplate::where('is_active', 1)
+            ->where(function ($q) use ($category) {
                 $q->where('repair_category_id', $category->id)
-                  ->orWhereNull('repair_category_id')
-                  ->orWhere('item_group', $category->item_group);
+                    ->orWhereNull('repair_category_id')
+                    ->orWhere('item_group', $category->item_group);
             })
             ->orderBy('title')
-            ->get(['id','title','description']);
+            ->get(['id', 'title', 'description']);
         return response()->json($items);
     }
 
@@ -260,7 +261,7 @@ class RepairRequestController extends Controller
             // Do not trust browser values when an asset is selected.
             // Item Type, Item Name, Inventory No. and Room No. are always taken from the allocated asset.
             $data['item_type'] = $asset->asset_category;
-            $data['item_name'] = trim($asset->item_name.' '.($asset->make ? '(' . $asset->make . ' ' . $asset->model . ')' : ''));
+            $data['item_name'] = trim($asset->item_name . ' ' . ($asset->make ? '(' . $asset->make . ' ' . $asset->model . ')' : ''));
             $data['inventory_no'] = $asset->inventory_no;
             $data['room_no'] = $asset->location ?: $requestingEmployee->room_no;
 
@@ -270,7 +271,7 @@ class RepairRequestController extends Controller
         }
 
         if (empty($data['repair_category_id'])) {
-            $general = RepairCategory::where('name','General Repair')->orWhere('name','General')->first();
+            $general = RepairCategory::where('name', 'General Repair')->orWhere('name', 'General')->first();
             if (!$general) return back()->withErrors('Please select category.')->withInput();
             $data['repair_category_id'] = $general->id;
         }
@@ -286,7 +287,7 @@ class RepairRequestController extends Controller
         }
 
         if ($request->hasFile('attachment')) {
-            $data['attachment'] = $request->file('attachment')->store('repair_attachments','public');
+            $data['attachment'] = $request->file('attachment')->store('repair_attachments', 'public');
         }
 
         // Official workflow: every request first goes to Storekeeper.
@@ -303,77 +304,79 @@ class RepairRequestController extends Controller
 
         return redirect()->route('repair-requests.show', $requestModel)->with('success', 'Request submitted. It has gone to Storekeeper first.');
     }
-public function show(RepairRequest $repair_request)
-{
-    $this->authorizeView($repair_request);
+    public function show(RepairRequest $repair_request)
+    {
+        $this->authorizeView($repair_request);
 
-    $repair_request->load([
-        'employee.college',
-        'employee.department',
-        'college',
-        'department',
-        'category',
-        'asset',
-        'problemTemplate',
-        'assignedTo',
-        'logs.user',
-        'programmer',
-        'storekeeper',
-        'd4Receiver',
-        'proformaGeneratedBy',
-        'estimates.vendor',
-        'estimates.enteredBy',
-        'estimates.programmer',
-        'selectedEstimate.vendor'
-    ]);
+        $repair_request->load([
+            'employee.college',
+            'employee.department',
+            'college',
+            'department',
+            'category',
+            'asset',
+            'problemTemplate',
+            'assignedTo',
+            'logs.user',
+            'programmer',
+            'storekeeper',
+            'd4Receiver',
+            'proformaGeneratedBy',
+            'estimates.vendor',
+            'estimates.enteredBy',
+            'estimates.programmer',
+            'selectedEstimate.vendor'
+        ]);
 
-    $user = Auth::user();
-    $employee = $user ? $user->employee : null;
-    $isStoreIncharge = $this->employeeHasCharge($employee, 'Store Incharge');
+        $user = Auth::user();
+        $employee = $user ? $user->employee : null;
+        $isStoreIncharge = $this->employeeHasCharge($employee, 'Store Incharge');
 
-    $isSuperuser = $user && method_exists($user, 'hasRole') && $user->hasRole('superuser');
-    $canStorekeeperAction = $isSuperuser || ($user && method_exists($user, 'hasRole') && $user->hasRole('storekeeper'));
-    $canProgrammerAction = $isSuperuser
-        || ($user && method_exists($user, 'hasRole') && ($user->hasRole('programmer') || $user->hasRole('store_incharge')))
-        || $isStoreIncharge
-        || ($employee && $repair_request->assigned_to_employee_id == $employee->id && in_array($repair_request->current_handler_role, ['programmer','store_incharge']));
-    $canManualUpdate = $isSuperuser || ($user && method_exists($user, 'hasAnyRole') && $user->hasAnyRole(['admin','director']));
+        $isSuperuser = $user && method_exists($user, 'hasRole') && $user->hasRole('superuser');
+        $canStorekeeperAction = $isSuperuser || ($user && method_exists($user, 'hasRole') && $user->hasRole('storekeeper'));
+        $canProgrammerAction = $isSuperuser
+            || ($user && method_exists($user, 'hasRole') && ($user->hasRole('programmer') || $user->hasRole('store_incharge')))
+            || $isStoreIncharge
+            || ($employee && $repair_request->assigned_to_employee_id == $employee->id && in_array($repair_request->current_handler_role, ['programmer', 'store_incharge']));
+        $canManualUpdate = $isSuperuser || ($user && method_exists($user, 'hasAnyRole') && $user->hasAnyRole(['admin', 'director']));
 
-    $employees = collect();
-    $programmers = collect();
-    $storeIncharges = collect();
-    $vendors = collect();
+        $employees = collect();
+        $programmers = collect();
+        $storeIncharges = collect();
+        $vendors = collect();
 
-    if ($canStorekeeperAction || $canManualUpdate) {
-        $employees = AccessScope::employeesQuery()
-            ->with(['user','activeCharges'])
-            ->orderBy('first_name')
-            ->get();
+        if ($canStorekeeperAction || $canManualUpdate) {
+            $employees = AccessScope::employeesQuery()
+                ->with(['user', 'activeCharges'])
+                ->orderBy('first_name')
+                ->get();
+        }
+
+        if ($canStorekeeperAction) {
+            $programmers = AccessScope::apply(Employee::whereHas('user', function ($q) {
+                $q->where('is_active', 1)->where(function ($x) {
+                    $x->where('role', 'programmer')
+                        ->orWhereHas('roles', function ($r) {
+                            $r->where('name', 'programmer')->orWhere('slug', 'programmer');
+                        });
+                });
+            }))->orderBy('first_name')->get();
+
+            $storeIncharges = AccessScope::apply(Employee::whereHas('activeCharges', function ($q) {
+                $q->where('charge_name', 'Store Incharge');
+            }))->orderBy('first_name')->get();
+
+            $vendors = Vendor::where('is_active', 1)->orderBy('name')->get();
+        }
+
+        return view('repair_requests.show', [
+            'request' => $repair_request,
+            'employees' => $employees,
+            'programmers' => $programmers,
+            'storeIncharges' => $storeIncharges,
+            'vendors' => $vendors,
+        ]);
     }
-
-    if ($canStorekeeperAction) {
-        $programmers = AccessScope::apply(Employee::whereHas('user', function($q) {
-            $q->where('is_active', 1)->where(function($x) {
-                $x->where('role', 'programmer')
-                  ->orWhereHas('roles', function($r) { $r->where('name', 'programmer')->orWhere('slug', 'programmer'); });
-            });
-        }))->orderBy('first_name')->get();
-
-        $storeIncharges = AccessScope::apply(Employee::whereHas('activeCharges', function($q) {
-            $q->where('charge_name', 'Store Incharge');
-        }))->orderBy('first_name')->get();
-
-        $vendors = Vendor::where('is_active', 1)->orderBy('name')->get();
-    }
-
-    return view('repair_requests.show', [
-        'request' => $repair_request,
-        'employees' => $employees,
-        'programmers' => $programmers,
-        'storeIncharges' => $storeIncharges,
-        'vendors' => $vendors,
-    ]);
-}
 
     public function storekeeperAction(Request $request, RepairRequest $repair_request)
     {
@@ -509,7 +512,7 @@ public function show(RepairRequest $repair_request)
         }
 
         $repair_request->save();
-        $this->log($repair_request, 'Storekeeper Action', $old, $repair_request->status, $message.' '.$data['storekeeper_remarks']);
+        $this->log($repair_request, 'Storekeeper Action', $old, $repair_request->status, $message . ' ' . $data['storekeeper_remarks']);
 
         return back()->with('success', $message);
     }
@@ -550,35 +553,35 @@ public function show(RepairRequest $repair_request)
         $storekeeper = $this->findEmployeeByRole('storekeeper');
         $repair_request->assigned_to_employee_id = optional($storekeeper)->id;
         $repair_request->current_handler_role = 'storekeeper';
-        
+
         if ($data['action'] == 'receive') {
             $repair_request->assigned_to_employee_id = $empId;
             $repair_request->current_handler_role = ($verifierLabel == 'Store Incharge') ? 'store_incharge' : 'programmer';
-            $repair_request->status = $verifierLabel.' Received for Verification';
-            $message = $verifierLabel.' received request for verification.';
+            $repair_request->status = $verifierLabel . ' Received for Verification';
+            $message = $verifierLabel . ' received request for verification.';
         } elseif ($data['action'] == 'estimate_ok') {
             $estimate->programmer_verification_status = 'Estimate OK';
             $repair_request->programmer_estimate_status = 'Estimate OK';
             $repair_request->programmer_completed_at = Carbon::now();
-            $repair_request->status = $verifierLabel.' Verified Estimate OK';
-            $message = $verifierLabel.' verified item/repair/estimate and found it OK. Request returned to Storekeeper.';
+            $repair_request->status = $verifierLabel . ' Verified Estimate OK';
+            $message = $verifierLabel . ' verified item/repair/estimate and found it OK. Request returned to Storekeeper.';
         } elseif ($data['action'] == 'estimate_not_ok') {
             $estimate->programmer_verification_status = 'Estimate Not OK';
             $repair_request->programmer_estimate_status = 'Estimate Not OK';
             $repair_request->programmer_completed_at = Carbon::now();
-            $repair_request->status = $verifierLabel.' Returned - Estimate Not OK';
-            $message = $verifierLabel.' did not approve estimate. Request returned to Storekeeper.';
+            $repair_request->status = $verifierLabel . ' Returned - Estimate Not OK';
+            $message = $verifierLabel . ' did not approve estimate. Request returned to Storekeeper.';
         } else {
             $estimate->programmer_verification_status = 'Need Revised Estimate';
             $repair_request->programmer_estimate_status = 'Need Revised Estimate';
             $repair_request->programmer_completed_at = Carbon::now();
-            $repair_request->status = $verifierLabel.' Asked for Revised Estimate';
-            $message = $verifierLabel.' asked Storekeeper for revised estimate.';
+            $repair_request->status = $verifierLabel . ' Asked for Revised Estimate';
+            $message = $verifierLabel . ' asked Storekeeper for revised estimate.';
         }
 
         $estimate->save();
         $repair_request->save();
-        $this->log($repair_request, $verifierLabel.' Verification Remarks', $old, $repair_request->status, $message.' '.$data['programmer_remarks']);
+        $this->log($repair_request, $verifierLabel . ' Verification Remarks', $old, $repair_request->status, $message . ' ' . $data['programmer_remarks']);
 
         return back()->with('success', $message);
     }
@@ -586,7 +589,7 @@ public function show(RepairRequest $repair_request)
     public function d4Action(Request $request, RepairRequest $repair_request)
     {
         $user = Auth::user();
-if (!$user->isRole(['admin','college_admin','department_admin','director','d4_seat'])) abort(403);
+        if (!$user->isRole(['admin', 'college_admin', 'department_admin', 'director', 'd4_seat'])) abort(403);
         if (!AccessScope::canAccessDepartment($repair_request->department_id, $user)) abort(403);
 
         $data = $request->validate([
@@ -611,14 +614,14 @@ if (!$user->isRole(['admin','college_admin','department_admin','director','d4_se
         }
 
         $repair_request->save();
-        $this->log($repair_request, 'D-4 Action', $old, $repair_request->status, $message.' '.$data['d4_remarks']);
+        $this->log($repair_request, 'D-4 Action', $old, $repair_request->status, $message . ' ' . $data['d4_remarks']);
         return back()->with('success', $message);
     }
 
     public function updateStatus(Request $request, RepairRequest $repair_request)
     {
         $user = Auth::user();
-if (!$user->hasRole('superuser') && !$user->hasRole('admin') && !$user->hasRole('director')) abort(403);
+        if (!$user->hasRole('superuser') && !$user->hasRole('admin') && !$user->hasRole('director')) abort(403);
         if (!AccessScope::canAccessDepartment($repair_request->department_id, $user)) abort(403);
 
         $data = $request->validate([
@@ -665,187 +668,404 @@ if (!$user->hasRole('superuser') && !$user->hasRole('admin') && !$user->hasRole(
         $this->log($repair_request, 'Employee Feedback', $old, $repair_request->status, $data['employee_feedback']);
         return back()->with('success', 'Feedback submitted.');
     }
-public function proforma(RepairRequest $repair_request)
+    public function proforma(RepairRequest $repair_request)
 {
-    $this->authorizeView($repair_request);
-
     $repair_request->load([
         'employee.department',
         'department',
         'category',
-        'asset',
-        'assignedTo',
-        'storekeeper',
-        'programmer',
-        'proformaGeneratedBy',
         'selectedEstimate.vendor',
-        'selectedEstimate.programmer'
+        'selectedEstimate.programmer',
+        'programmer',
     ]);
 
-    if (
-        $repair_request->programmer_estimate_status != 'Estimate OK'
-        || !$repair_request->selectedEstimate
-    ) {
+    /*
+     * Make sure a selected estimate exists.
+     */
+    if (!$repair_request->selectedEstimate) {
         return redirect()
-            ->route('repair-requests.show', $repair_request)
+            ->back()
             ->withErrors(
-                'Financial Sanction Proforma can be printed only after Programmer / Store Incharge verifies the selected estimate as OK.'
+                'No vendor estimate has been selected for this request.'
             );
     }
 
-    if (!$repair_request->proforma_generated_at) {
-        $this->prepareProformaFromEstimate($repair_request);
-        $repair_request->save();
+    $estimateFile = $repair_request
+        ->selectedEstimate
+        ->estimate_file;
+
+    if (!$estimateFile) {
+        return redirect()
+            ->back()
+            ->withErrors(
+                'The selected estimate does not contain a PDF file.'
+            );
     }
 
     /*
-    |--------------------------------------------------------------------------
-    | Generate proforma PDF
-    |--------------------------------------------------------------------------
-    */
-    $proformaPdf = PDF::loadView(
-        'repair_requests.proforma',
-        [
-            'request' => $repair_request,
-            'pdfMode' => true,
-        ]
-    )->setPaper('a4', 'portrait');
+     * Database normally contains:
+     * vendor_estimates/filename.pdf
+     */
+    $estimateFile = str_replace('\\', '/', $estimateFile);
+    $estimateFile = ltrim($estimateFile, '/');
 
     /*
-    |--------------------------------------------------------------------------
-    | Create temporary proforma PDF file
-    |--------------------------------------------------------------------------
-    */
-    $temporaryDirectory = storage_path('app/temp');
-
-    if (!is_dir($temporaryDirectory)) {
-        mkdir($temporaryDirectory, 0775, true);
+     * Remove optional prefixes if they were saved in the database.
+     */
+    if (strpos($estimateFile, 'storage/') === 0) {
+        $estimateFile = substr($estimateFile, strlen('storage/'));
     }
 
-    $uniqueName = 'repair_proforma_'
-        . $repair_request->id
-        . '_'
-        . uniqid();
+    if (strpos($estimateFile, 'public/') === 0) {
+        $estimateFile = substr($estimateFile, strlen('public/'));
+    }
 
-    $proformaPath = $temporaryDirectory.'/'.$uniqueName.'.pdf';
-
-    file_put_contents(
-        $proformaPath,
-        $proformaPdf->output()
+    $estimatePath = storage_path(
+        'app/public/'.$estimateFile
     );
 
+    if (!file_exists($estimatePath)) {
+        Log::error('Estimate PDF file not found', [
+            'repair_request_id' => $repair_request->id,
+            'database_file'     => $repair_request
+                ->selectedEstimate
+                ->estimate_file,
+            'resolved_path'     => $estimatePath,
+        ]);
+
+        return redirect()
+            ->back()
+            ->withErrors(
+                'Estimate PDF file was not found on the server.'
+            );
+    }
+
+    if (!is_readable($estimatePath)) {
+        return redirect()
+            ->back()
+            ->withErrors(
+                'Estimate PDF exists but is not readable by the server.'
+            );
+    }
+
     /*
-    |--------------------------------------------------------------------------
-    | Locate selected estimate PDF
-    |--------------------------------------------------------------------------
-    | estimate_file is saved using:
-    | store('vendor_estimates', 'public')
-    |--------------------------------------------------------------------------
-    */
-    $selectedEstimate = $repair_request->selectedEstimate;
-    $estimatePath = null;
+     * Temporary folder used for PDF generation and conversion.
+     */
+    $temporaryDirectory = storage_path(
+        'app/temp/repair_pdf_merge'
+    );
+
+    if (!is_dir($temporaryDirectory)) {
+        if (
+            !mkdir($temporaryDirectory, 0775, true)
+            && !is_dir($temporaryDirectory)
+        ) {
+            return redirect()
+                ->back()
+                ->withErrors(
+                    'Unable to create the temporary PDF directory.'
+                );
+        }
+    }
+
+    $uniqueName = 'request_'
+        .$repair_request->id
+        .'_'
+        .uniqid();
+
+    $originalProformaPath = $temporaryDirectory
+        .'/'.$uniqueName.'_proforma_original.pdf';
+
+    $compatibleProformaPath = $temporaryDirectory
+        .'/'.$uniqueName.'_proforma_compatible.pdf';
+
+    $compatibleEstimatePath = $temporaryDirectory
+        .'/'.$uniqueName.'_estimate_compatible.pdf';
+
+    try {
+        /*
+         * -------------------------------------------------
+         * STEP 1: Generate sanction proforma using Dompdf
+         * -------------------------------------------------
+         */
+        $proformaPdf = PDF::loadView(
+            'repair_requests.proforma',
+            [
+                'request' => $repair_request,
+                'pdfMode' => true,
+            ]
+        )->setPaper('a4', 'portrait');
+
+        $proformaContent = $proformaPdf->output();
+
+        if (!$proformaContent) {
+            throw new \Exception(
+                'The financial sanction proforma could not be generated.'
+            );
+        }
+
+        $writtenBytes = file_put_contents(
+            $originalProformaPath,
+            $proformaContent
+        );
+
+        if (
+            $writtenBytes === false
+            || !file_exists($originalProformaPath)
+            || filesize($originalProformaPath) === 0
+        ) {
+            throw new \Exception(
+                'The generated proforma PDF could not be saved temporarily.'
+            );
+        }
+
+        /*
+         * -------------------------------------------------
+         * STEP 2: Convert both PDFs into FPDI-compatible PDFs
+         * -------------------------------------------------
+         */
+        $this->makePdfFpdiCompatible(
+            $originalProformaPath,
+            $compatibleProformaPath
+        );
+
+        $this->makePdfFpdiCompatible(
+            $estimatePath,
+            $compatibleEstimatePath
+        );
+
+        /*
+         * -------------------------------------------------
+         * STEP 3: Merge both PDFs
+         * -------------------------------------------------
+         */
+        $mergedPdf = new Fpdi();
+
+        /*
+         * Page 1: Financial sanction proforma
+         */
+        $this->appendPdfPages(
+            $mergedPdf,
+            $compatibleProformaPath
+        );
+
+        /*
+         * Page 2 onwards: Vendor estimate
+         */
+        $this->appendPdfPages(
+            $mergedPdf,
+            $compatibleEstimatePath
+        );
+
+        /*
+         * Return merged PDF as a string.
+         *
+         * For setasign/fpdf 1.8+, destination "S"
+         * returns the PDF as a string.
+         */
+        $mergedContent = $mergedPdf->Output('S');
+
+        if (!$mergedContent) {
+            throw new \Exception(
+                'The merged PDF could not be generated.'
+            );
+        }
+
+        $fileName = 'financial-sanction-'
+            .$repair_request->request_no
+            .'.pdf';
+
+        /*
+         * Keep filename safe for the response header.
+         */
+        $fileName = preg_replace(
+            '/[^A-Za-z0-9._-]/',
+            '-',
+            $fileName
+        );
+
+        return response($mergedContent, 200, [
+            'Content-Type' => 'application/pdf',
+
+            'Content-Disposition' =>
+                'inline; filename="'.$fileName.'"',
+
+            'Content-Length' =>
+                strlen($mergedContent),
+
+            'Cache-Control' =>
+                'private, no-store, no-cache, must-revalidate',
+
+            'Pragma' => 'no-cache',
+
+            'Expires' => '0',
+
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
+
+    } catch (\Throwable $e) {
+        Log::error('Repair request PDF merge failed', [
+            'repair_request_id' => $repair_request->id,
+            'request_no'        => $repair_request->request_no,
+            'estimate_path'     => $estimatePath,
+            'error'             => $e->getMessage(),
+            'file'              => $e->getFile(),
+            'line'              => $e->getLine(),
+            'trace'             => $e->getTraceAsString(),
+        ]);
+
+        return redirect()
+            ->back()
+            ->withErrors(
+                'PDF merge failed: '.$e->getMessage()
+            );
+
+    } finally {
+        /*
+         * Delete only temporary files.
+         * Never delete the original uploaded estimate.
+         */
+        $temporaryFiles = [
+            $originalProformaPath,
+            $compatibleProformaPath,
+            $compatibleEstimatePath,
+        ];
+
+        foreach ($temporaryFiles as $temporaryFile) {
+            if (
+                $temporaryFile
+                && file_exists($temporaryFile)
+            ) {
+                @unlink($temporaryFile);
+            }
+        }
+    }
+}private function makePdfFpdiCompatible(
+    $sourcePath,
+    $destinationPath
+) {
+    if (!$sourcePath || !file_exists($sourcePath)) {
+        throw new \Exception(
+            'Source PDF was not found: '.$sourcePath
+        );
+    }
+
+    if (!is_readable($sourcePath)) {
+        throw new \Exception(
+            'Source PDF is not readable: '.$sourcePath
+        );
+    }
+
+    /*
+     * Confirm exec() is available.
+     */
+    if (!function_exists('exec')) {
+        throw new \Exception(
+            'The PHP exec function is disabled. '
+            .'It is required for qpdf conversion.'
+        );
+    }
+
+    /*
+     * Change this only if "which qpdf" returns another path.
+     */
+    $qpdfBinary = '/usr/bin/qpdf';
+
+    if (!file_exists($qpdfBinary)) {
+        throw new \Exception(
+            'qpdf was not found at '.$qpdfBinary
+            .'. Run "which qpdf" to find its location.'
+        );
+    }
+
+    $destinationDirectory = dirname($destinationPath);
+
+    if (!is_dir($destinationDirectory)) {
+        if (
+            !mkdir($destinationDirectory, 0775, true)
+            && !is_dir($destinationDirectory)
+        ) {
+            throw new \Exception(
+                'Unable to create the PDF conversion directory.'
+            );
+        }
+    }
+
+    /*
+     * Remove an old temporary file if it exists.
+     */
+    if (file_exists($destinationPath)) {
+        @unlink($destinationPath);
+    }
+
+    /*
+     * --object-streams=disable converts modern compressed
+     * object streams into a format supported by free FPDI.
+     *
+     * --warning-exit-0 prevents harmless qpdf warnings
+     * from being treated as complete failure.
+     */
+    $command = escapeshellarg($qpdfBinary)
+        .' --warning-exit-0'
+        .' --object-streams=disable'
+        .' '
+        .escapeshellarg($sourcePath)
+        .' '
+        .escapeshellarg($destinationPath)
+        .' 2>&1';
+
+    $commandOutput = [];
+    $exitCode = 0;
+
+    exec(
+        $command,
+        $commandOutput,
+        $exitCode
+    );
 
     if (
-        $selectedEstimate
-        && !empty($selectedEstimate->estimate_file)
+        $exitCode !== 0
+        || !file_exists($destinationPath)
+        || filesize($destinationPath) === 0
     ) {
-        $estimateRelativePath = ltrim(
-            $selectedEstimate->estimate_file,
-            '/'
-        );
+        if (file_exists($destinationPath)) {
+            @unlink($destinationPath);
+        }
 
-        // Handle a database value beginning with "storage/".
-        $estimateRelativePath = preg_replace(
-            '#^storage/#',
-            '',
-            $estimateRelativePath
-        );
-
-        $estimatePath = storage_path(
-            'app/public/'.$estimateRelativePath
+        throw new \Exception(
+            'qpdf conversion failed. Exit code: '
+            .$exitCode
+            .'. Output: '
+            .implode(' ', $commandOutput)
         );
     }
 
     /*
-    |--------------------------------------------------------------------------
-    | If estimate PDF is missing, return proforma only
-    |--------------------------------------------------------------------------
-    */
-    $validEstimatePdf =
-        $estimatePath
-        && file_exists($estimatePath)
-        && is_readable($estimatePath)
-        && strtolower(pathinfo($estimatePath, PATHINFO_EXTENSION)) === 'pdf';
-
-    if (!$validEstimatePdf) {
-        @unlink($proformaPath);
-
-        return $proformaPdf->stream(
-            'repair-proforma-'.$repair_request->id.'.pdf'
-        );
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | Merge proforma and vendor estimate
-    |--------------------------------------------------------------------------
-    */
-    try {
-    $mergedPdf = new \setasign\Fpdi\Fpdi();
-
-    // First page: generated financial sanction proforma
-    $this->appendPdfPages($mergedPdf, $proformaPath);
-
-    // Remaining pages: selected vendor estimate
-    $this->appendPdfPages($mergedPdf, $estimatePath);
-
-    /*
-     * For older FPDF/FPDI versions:
-     * Output(filename, destination)
+     * Confirm the generated file is actually a PDF.
      */
-    $mergedContent = $mergedPdf->Output('', 'S');
+    $handle = fopen($destinationPath, 'rb');
 
-    @unlink($proformaPath);
-
-    $fileName = 'repair-proforma-with-estimate-'
-        .$repair_request->id
-        .'.pdf';
-
-    /*
-     * Remove any warning, notice, whitespace or HTML output.
-     */
-    while (ob_get_level() > 0) {
-        ob_end_clean();
+    if ($handle === false) {
+        throw new \Exception(
+            'Unable to open the converted PDF.'
+        );
     }
 
-    return response($mergedContent, 200, [
-        'Content-Type' => 'application/pdf',
-        'Content-Disposition' => 'inline; filename="'.$fileName.'"',
-        'Content-Length' => strlen($mergedContent),
-        'Cache-Control' => 'private, no-store, no-cache, must-revalidate',
-        'Pragma' => 'no-cache',
-        'X-Content-Type-Options' => 'nosniff',
-    ]);
+    $pdfHeader = fread($handle, 5);
+    fclose($handle);
 
-} catch (\Exception $e) {
-    @unlink($proformaPath);
+    if ($pdfHeader !== '%PDF-') {
+        @unlink($destinationPath);
 
-    \Log::error('Repair proforma PDF merge failed', [
-        'repair_request_id' => $repair_request->id,
-        'proforma_path' => $proformaPath,
-        'estimate_path' => $estimatePath,
-        'error' => $e->getMessage(),
-        'trace' => $e->getTraceAsString(),
-    ]);
-
-    return redirect()
-        ->route('repair-requests.show', $repair_request)
-        ->withErrors(
-            'PDF merge failed: '.$e->getMessage()
+        throw new \Exception(
+            'qpdf created an invalid PDF file.'
         );
+    }
+
+    return $destinationPath;
 }
-}private function appendPdfPages(
-    \setasign\Fpdi\Fpdi $mergedPdf,
+    private function appendPdfPages(
+    Fpdi $mergedPdf,
     $sourcePath
 ) {
     if (!$sourcePath || !file_exists($sourcePath)) {
@@ -860,32 +1080,76 @@ public function proforma(RepairRequest $repair_request)
         );
     }
 
-    $pageCount = $mergedPdf->setSourceFile($sourcePath);
-
-    for ($pageNumber = 1; $pageNumber <= $pageCount; $pageNumber++) {
-        $templateId = $mergedPdf->importPage($pageNumber);
-
-        $pageSize = $mergedPdf->getTemplateSize($templateId);
-
-        $orientation =
-            $pageSize['width'] > $pageSize['height']
-                ? 'L'
-                : 'P';
-
-        $mergedPdf->AddPage(
-            $orientation,
-            [
-                $pageSize['width'],
-                $pageSize['height'],
-            ]
+    try {
+        $pageCount = $mergedPdf->setSourceFile(
+            $sourcePath
         );
 
-        $mergedPdf->useTemplate(
-            $templateId,
+        if ($pageCount < 1) {
+            throw new \Exception(
+                'The PDF does not contain any pages.'
+            );
+        }
+
+        for (
+            $pageNumber = 1;
+            $pageNumber <= $pageCount;
+            $pageNumber++
+        ) {
+            $templateId = $mergedPdf->importPage(
+                $pageNumber
+            );
+
+            $pageSize = $mergedPdf->getTemplateSize(
+                $templateId
+            );
+
+            if (
+                !$pageSize
+                || empty($pageSize['width'])
+                || empty($pageSize['height'])
+            ) {
+                throw new \Exception(
+                    'Unable to determine the size of PDF page '
+                    .$pageNumber
+                    .'.'
+                );
+            }
+
+            $orientation =
+                $pageSize['width'] > $pageSize['height']
+                    ? 'L'
+                    : 'P';
+
+            /*
+             * Preserve the original page dimensions.
+             */
+            $mergedPdf->AddPage(
+                $orientation,
+                [
+                    $pageSize['width'],
+                    $pageSize['height'],
+                ]
+            );
+
+            $mergedPdf->useTemplate(
+                $templateId,
+                0,
+                0,
+                $pageSize['width'],
+                $pageSize['height'],
+                true
+            );
+        }
+
+    } catch (\Throwable $e) {
+        throw new \Exception(
+            'Unable to import PDF pages from '
+            .basename($sourcePath)
+            .': '
+            .$e->getMessage(),
             0,
-            0,
-            $pageSize['width'],
-            $pageSize['height']
+            $e
         );
     }
 }
@@ -893,7 +1157,7 @@ public function proforma(RepairRequest $repair_request)
     {
         $year = date('Y');
         $count = RepairRequest::whereYear('created_at', $year)->count() + 1;
-        return 'DEE-REP-'.$year.'-'.str_pad($count, 4, '0', STR_PAD_LEFT);
+        return 'DEE-REP-' . $year . '-' . str_pad($count, 4, '0', STR_PAD_LEFT);
     }
 
     private function saveEstimateFromStorekeeper(RepairRequest $repairRequest, array $data, Request $httpRequest)
@@ -913,14 +1177,14 @@ public function proforma(RepairRequest $repair_request)
         ];
 
         if ($httpRequest->hasFile('estimate_file')) {
-            $estimateData['estimate_file'] = $httpRequest->file('estimate_file')->store('vendor_estimates','public');
+            $estimateData['estimate_file'] = $httpRequest->file('estimate_file')->store('vendor_estimates', 'public');
         }
 
         RepairEstimate::where('repair_request_id', $repairRequest->id)->update(['is_selected' => 0]);
         $estimate = RepairEstimate::create($estimateData);
         $repairRequest->selected_estimate_id = $estimate->id;
         $repairRequest->financial_sanction_amount = $estimate->estimate_amount;
-        $repairRequest->enclosure_details = $repairRequest->enclosure_details ?: 'Estimate / quotation PDF from '.$estimate->vendor->name;
+        $repairRequest->enclosure_details = $repairRequest->enclosure_details ?: 'Estimate / quotation PDF from ' . $estimate->vendor->name;
         return $estimate;
     }
 
@@ -930,7 +1194,7 @@ public function proforma(RepairRequest $repair_request)
         if ($estimate) {
             $repairRequest->financial_sanction_amount = $estimate->estimate_amount;
             if (!$repairRequest->enclosure_details) {
-                $repairRequest->enclosure_details = 'Estimate / quotation PDF from '.$estimate->vendor->name;
+                $repairRequest->enclosure_details = 'Estimate / quotation PDF from ' . $estimate->vendor->name;
             }
         }
         $repairRequest->requires_financial_sanction = 1;
@@ -971,14 +1235,14 @@ public function proforma(RepairRequest $repair_request)
     {
         $parts = [];
         if ($repairRequest->item_name) $parts[] = $repairRequest->item_name;
-        if ($repairRequest->inventory_no) $parts[] = '(Inventory No. '.$repairRequest->inventory_no.')';
-        if ($repairRequest->selected_vendor_name) $parts[] = 'as per estimate of '.$repairRequest->selected_vendor_name;
+        if ($repairRequest->inventory_no) $parts[] = '(Inventory No. ' . $repairRequest->inventory_no . ')';
+        if ($repairRequest->selected_vendor_name) $parts[] = 'as per estimate of ' . $repairRequest->selected_vendor_name;
         return trim(implode(' ', $parts)) ?: $repairRequest->problem_description;
     }
 
     private function findEmployeeByCharge($chargeName)
     {
-        $q = Employee::whereHas('activeCharges', function($q) use ($chargeName) {
+        $q = Employee::whereHas('activeCharges', function ($q) use ($chargeName) {
             $q->where('charge_name', $chargeName);
         });
         return AccessScope::apply($q)->first();
@@ -991,12 +1255,12 @@ public function proforma(RepairRequest $repair_request)
 
     private function findEmployeeByRole($role)
     {
-        $q = Employee::whereHas('user', function($q) use ($role) {
-            $q->where('is_active', 1)->where(function($x) use ($role) {
+        $q = Employee::whereHas('user', function ($q) use ($role) {
+            $q->where('is_active', 1)->where(function ($x) use ($role) {
                 $x->where('role', $role)
-                  ->orWhereHas('roles', function($r) use ($role) {
-                      $r->where('name', $role);
-                  });
+                    ->orWhereHas('roles', function ($r) use ($role) {
+                        $r->where('name', $role);
+                    });
             });
         });
         return AccessScope::apply($q)->first();
@@ -1005,7 +1269,7 @@ public function proforma(RepairRequest $repair_request)
     private function authorizeView(RepairRequest $request)
     {
         $user = Auth::user();
-        if ($user->isRole(['admin','college_admin','department_admin','director','storekeeper','programmer','d4_seat']) && AccessScope::canAccessDepartment($request->department_id, $user)) return true;
+        if ($user->isRole(['admin', 'college_admin', 'department_admin', 'director', 'storekeeper', 'programmer', 'd4_seat']) && AccessScope::canAccessDepartment($request->department_id, $user)) return true;
         if ($this->employeeHasCharge($user->employee, 'Store Incharge')) return true;
         if ($user->hasRole('employee') && optional($user->employee)->id == $request->employee_id) return true;
         abort(403);
@@ -1024,224 +1288,221 @@ public function proforma(RepairRequest $repair_request)
     }
 
 
-public function saveEstimateAndForward(Request $request, $id)
-{
-    $user = \Auth::user();
-    $employee = $user ? $user->employee : null;
+    public function saveEstimateAndForward(Request $request, $id)
+    {
+        $user = \Auth::user();
+        $employee = $user ? $user->employee : null;
 
-    if (!$user || (!$user->hasRole('superuser') && !$user->hasRole('storekeeper'))) {
-        abort(403, 'Only Storekeeper can save estimate and forward for verification.');
-    }
+        if (!$user || (!$user->hasRole('superuser') && !$user->hasRole('storekeeper'))) {
+            abort(403, 'Only Storekeeper can save estimate and forward for verification.');
+        }
 
-    $repairRequest = RepairRequest::findOrFail($id);
+        $repairRequest = RepairRequest::findOrFail($id);
 
-    /*
+        /*
      * Storekeeper can manage only own department unless Superuser.
      * Keep this backend check even if UI hides fields.
      */
-    if (!$user->hasRole('superuser')) {
-        if (!$employee || (int)$repairRequest->department_id !== (int)$employee->department_id) {
-            abort(403, 'You can process requests of your own department only.');
+        if (!$user->hasRole('superuser')) {
+            if (!$employee || (int)$repairRequest->department_id !== (int)$employee->department_id) {
+                abort(403, 'You can process requests of your own department only.');
+            }
         }
-    }
 
-    /*
+        /*
      * Prevent duplicate forward/history if already sent to Programmer/Store Incharge.
      */
-    if (in_array($repairRequest->current_handler_role, array('programmer', 'store_incharge'))) {
-        return redirect()
-            ->route('repair-requests.show', $repairRequest->id)
-            ->with('error', 'This request is already sent for verification.');
-    }
-
-    $request->validate(array(
-        'vendor_id' => 'required|integer',
-        'estimated_amount' => 'required|numeric|min:0',
-        'estimate_pdf' => 'required|file|mimes:pdf|max:5120',
-        'verification_role' => 'required|in:programmer,store_incharge',
-        'assigned_to_employee_id' => 'nullable|integer',
-        'remarks' => 'nullable|string|max:1000',
-    ));
-
-    \DB::beginTransaction();
-
-    try {
-        $oldStatus = $repairRequest->status ?: '-';
-
-        /*
-         * Upload PDF.
-         */
-        $pdfPath = null;
-        if ($request->hasFile('estimate_pdf')) {
-            $pdfPath = $request->file('estimate_pdf')->store('repair-estimates', 'public');
+        if (in_array($repairRequest->current_handler_role, array('programmer', 'store_incharge'))) {
+            return redirect()
+                ->route('repair-requests.show', $repairRequest->id)
+                ->with('error', 'This request is already sent for verification.');
         }
 
-        /*
+        $request->validate(array(
+            'vendor_id' => 'required|integer',
+            'estimated_amount' => 'required|numeric|min:0',
+            'estimate_pdf' => 'required|file|mimes:pdf|max:5120',
+            'verification_role' => 'required|in:programmer,store_incharge',
+            'assigned_to_employee_id' => 'nullable|integer',
+            'remarks' => 'nullable|string|max:1000',
+        ));
+
+        \DB::beginTransaction();
+
+        try {
+            $oldStatus = $repairRequest->status ?: '-';
+
+            /*
+         * Upload PDF.
+         */
+            $pdfPath = null;
+            if ($request->hasFile('estimate_pdf')) {
+                $pdfPath = $request->file('estimate_pdf')->store('repair-estimates', 'public');
+            }
+
+            /*
          * Create estimate.
          * Replace RepairEstimate with your actual estimate model if different.
          */
-        $estimate = new RepairEstimate();
-        $estimate->repair_request_id = $repairRequest->id;
-        $estimate->vendor_id = $request->vendor_id;
-        $estimate->estimated_amount = $request->estimated_amount;
-        $estimate->estimate_pdf = $pdfPath;
-        $estimate->remarks = $request->remarks;
-        $estimate->created_by = $user->id;
-        $estimate->save();
+            $estimate = new RepairEstimate();
+            $estimate->repair_request_id = $repairRequest->id;
+            $estimate->vendor_id = $request->vendor_id;
+            $estimate->estimated_amount = $request->estimated_amount;
+            $estimate->estimate_pdf = $pdfPath;
+            $estimate->remarks = $request->remarks;
+            $estimate->created_by = $user->id;
+            $estimate->save();
 
-        /*
+            /*
          * Save estimate + forward in one request update.
          */
-        $newStatus = $request->verification_role === 'store_incharge'
-            ? 'Sent to Store Incharge for Verification'
-            : 'Sent to Programmer for Verification';
+            $newStatus = $request->verification_role === 'store_incharge'
+                ? 'Sent to Store Incharge for Verification'
+                : 'Sent to Programmer for Verification';
 
-        $repairRequest->selected_estimate_id = $estimate->id;
-        $repairRequest->status = $newStatus;
-        $repairRequest->current_handler_role = $request->verification_role;
+            $repairRequest->selected_estimate_id = $estimate->id;
+            $repairRequest->status = $newStatus;
+            $repairRequest->current_handler_role = $request->verification_role;
 
-        if ($request->filled('assigned_to_employee_id')) {
-            $repairRequest->assigned_to_employee_id = $request->assigned_to_employee_id;
-        }
+            if ($request->filled('assigned_to_employee_id')) {
+                $repairRequest->assigned_to_employee_id = $request->assigned_to_employee_id;
+            }
 
-        $repairRequest->save();
+            $repairRequest->save();
 
-        /*
+            /*
          * Create ONLY ONE history entry for this complete action.
          * If your project has a different history helper, replace this part
          * with that helper, but keep it as one entry only.
          */
-        if (method_exists($this, 'addHistory')) {
-            $this->addHistory(
-                $repairRequest,
-                'Storekeeper Action',
-                $oldStatus,
-                $newStatus,
-                'Vendor estimate saved and forwarded for physical/technical verification. '.$request->remarks
-            );
-        } elseif (class_exists('App\\RepairRequestHistory')) {
-            $history = new \App\RepairRequestHistory();
-            $history->repair_request_id = $repairRequest->id;
-            $history->action_type = 'Storekeeper Action';
-            $history->from_status = $oldStatus;
-            $history->to_status = $newStatus;
-            $history->remarks = 'Vendor estimate saved and forwarded for physical/technical verification. '.$request->remarks;
-            $history->created_by = $user->id;
-            $history->save();
+            if (method_exists($this, 'addHistory')) {
+                $this->addHistory(
+                    $repairRequest,
+                    'Storekeeper Action',
+                    $oldStatus,
+                    $newStatus,
+                    'Vendor estimate saved and forwarded for physical/technical verification. ' . $request->remarks
+                );
+            } elseif (class_exists('App\\RepairRequestHistory')) {
+                $history = new \App\RepairRequestHistory();
+                $history->repair_request_id = $repairRequest->id;
+                $history->action_type = 'Storekeeper Action';
+                $history->from_status = $oldStatus;
+                $history->to_status = $newStatus;
+                $history->remarks = 'Vendor estimate saved and forwarded for physical/technical verification. ' . $request->remarks;
+                $history->created_by = $user->id;
+                $history->save();
+            }
+
+            \DB::commit();
+
+            return redirect()
+                ->route('repair-requests.show', $repairRequest->id)
+                ->with('success', 'Vendor estimate saved and sent for verification.');
+        } catch (\Exception $e) {
+            \DB::rollBack();
+
+            return redirect()
+                ->back()
+                ->withInput()
+                ->with('error', 'Estimate could not be saved/forwarded: ' . $e->getMessage());
         }
-
-        \DB::commit();
-
-        return redirect()
-            ->route('repair-requests.show', $repairRequest->id)
-            ->with('success', 'Vendor estimate saved and sent for verification.');
-
-    } catch (\Exception $e) {
-        \DB::rollBack();
-
-        return redirect()
-            ->back()
-            ->withInput()
-            ->with('error', 'Estimate could not be saved/forwarded: '.$e->getMessage());
-    }
-}
-
-public function verifyAndReturnToStorekeeper(Request $request, $id)
-{
-    $user = \Auth::user();
-    $employee = $user ? $user->employee : null;
-    $repairRequest = RepairRequest::findOrFail($id);
-
-    $handler = $repairRequest->current_handler_role;
-
-    if (!in_array($handler, array('programmer', 'store_incharge'))) {
-        abort(403, 'This request is not pending with Programmer / Store Incharge.');
     }
 
-    $assignedToMe = $employee && $repairRequest->assigned_to_employee_id && (int)$repairRequest->assigned_to_employee_id === (int)$employee->id;
-    $isProgrammer = $handler === 'programmer' && $user->hasAnyRole(array('superuser', 'programmer'));
-    $isStoreIncharge = $handler === 'store_incharge' && (
-        $user->hasRole('superuser')
-        || $user->hasRole('store_incharge')
-        || ($employee && method_exists($employee, 'hasActiveCharge') && $employee->hasActiveCharge('Store Incharge'))
-    );
+    public function verifyAndReturnToStorekeeper(Request $request, $id)
+    {
+        $user = \Auth::user();
+        $employee = $user ? $user->employee : null;
+        $repairRequest = RepairRequest::findOrFail($id);
 
-    if (!$assignedToMe && !$isProgrammer && !$isStoreIncharge) {
-        abort(403, 'Only the assigned Programmer / Store Incharge can verify this request.');
+        $handler = $repairRequest->current_handler_role;
+
+        if (!in_array($handler, array('programmer', 'store_incharge'))) {
+            abort(403, 'This request is not pending with Programmer / Store Incharge.');
+        }
+
+        $assignedToMe = $employee && $repairRequest->assigned_to_employee_id && (int)$repairRequest->assigned_to_employee_id === (int)$employee->id;
+        $isProgrammer = $handler === 'programmer' && $user->hasAnyRole(array('superuser', 'programmer'));
+        $isStoreIncharge = $handler === 'store_incharge' && (
+            $user->hasRole('superuser')
+            || $user->hasRole('store_incharge')
+            || ($employee && method_exists($employee, 'hasActiveCharge') && $employee->hasActiveCharge('Store Incharge'))
+        );
+
+        if (!$assignedToMe && !$isProgrammer && !$isStoreIncharge) {
+            abort(403, 'Only the assigned Programmer / Store Incharge can verify this request.');
+        }
+
+        $request->validate(array(
+            'verification_decision' => 'required|in:ok,not_ok,revised',
+            'verification_remarks' => 'required|string|max:1000',
+        ));
+
+        \DB::beginTransaction();
+
+        try {
+            $oldStatus = $repairRequest->status ?: '-';
+            $verifierLabel = $handler === 'store_incharge' ? 'Store Incharge' : 'Programmer';
+
+            if ($request->verification_decision === 'ok') {
+                $newStatus = $verifierLabel . ' Verified Estimate OK';
+            } elseif ($request->verification_decision === 'not_ok') {
+                $newStatus = $verifierLabel . ' Estimate Not OK';
+            } else {
+                $newStatus = $verifierLabel . ' Requested Revised Estimate';
+            }
+
+            $repairRequest->status = $newStatus;
+            $repairRequest->current_handler_role = 'storekeeper';
+            $repairRequest->assigned_to_employee_id = null;
+
+            if (\Schema::hasColumn('repair_requests', 'verification_remarks')) {
+                $repairRequest->verification_remarks = $request->verification_remarks;
+            }
+
+            if (\Schema::hasColumn('repair_requests', 'verified_by')) {
+                $repairRequest->verified_by = $user->id;
+            }
+
+            if (\Schema::hasColumn('repair_requests', 'verified_at')) {
+                $repairRequest->verified_at = now();
+            }
+
+            $repairRequest->save();
+
+            $historyRemarks = $verifierLabel . ' verified the estimate and returned the request to Storekeeper. ' . $request->verification_remarks;
+
+            if (method_exists($this, 'addHistory')) {
+                $this->addHistory(
+                    $repairRequest,
+                    $verifierLabel . ' Verification Remarks',
+                    $oldStatus,
+                    $newStatus,
+                    $historyRemarks
+                );
+            } elseif (class_exists('App\\RepairRequestHistory')) {
+                $history = new \App\RepairRequestHistory();
+                $history->repair_request_id = $repairRequest->id;
+                $history->action_type = $verifierLabel . ' Verification Remarks';
+                $history->from_status = $oldStatus;
+                $history->to_status = $newStatus;
+                $history->remarks = $historyRemarks;
+                $history->created_by = $user->id;
+                $history->save();
+            }
+
+            \DB::commit();
+
+            return redirect()
+                ->route('repair-requests.show', $repairRequest->id)
+                ->with('success', $verifierLabel . ' verification saved and request returned to Storekeeper.');
+        } catch (\Exception $e) {
+            \DB::rollBack();
+
+            return redirect()
+                ->back()
+                ->withInput()
+                ->with('error', 'Verification could not be saved: ' . $e->getMessage());
+        }
     }
-
-    $request->validate(array(
-        'verification_decision' => 'required|in:ok,not_ok,revised',
-        'verification_remarks' => 'required|string|max:1000',
-    ));
-
-    \DB::beginTransaction();
-
-    try {
-        $oldStatus = $repairRequest->status ?: '-';
-        $verifierLabel = $handler === 'store_incharge' ? 'Store Incharge' : 'Programmer';
-
-        if ($request->verification_decision === 'ok') {
-            $newStatus = $verifierLabel.' Verified Estimate OK';
-        } elseif ($request->verification_decision === 'not_ok') {
-            $newStatus = $verifierLabel.' Estimate Not OK';
-        } else {
-            $newStatus = $verifierLabel.' Requested Revised Estimate';
-        }
-
-        $repairRequest->status = $newStatus;
-        $repairRequest->current_handler_role = 'storekeeper';
-        $repairRequest->assigned_to_employee_id = null;
-
-        if (\Schema::hasColumn('repair_requests', 'verification_remarks')) {
-            $repairRequest->verification_remarks = $request->verification_remarks;
-        }
-
-        if (\Schema::hasColumn('repair_requests', 'verified_by')) {
-            $repairRequest->verified_by = $user->id;
-        }
-
-        if (\Schema::hasColumn('repair_requests', 'verified_at')) {
-            $repairRequest->verified_at = now();
-        }
-
-        $repairRequest->save();
-
-        $historyRemarks = $verifierLabel.' verified the estimate and returned the request to Storekeeper. '.$request->verification_remarks;
-
-        if (method_exists($this, 'addHistory')) {
-            $this->addHistory(
-                $repairRequest,
-                $verifierLabel.' Verification Remarks',
-                $oldStatus,
-                $newStatus,
-                $historyRemarks
-            );
-        } elseif (class_exists('App\\RepairRequestHistory')) {
-            $history = new \App\RepairRequestHistory();
-            $history->repair_request_id = $repairRequest->id;
-            $history->action_type = $verifierLabel.' Verification Remarks';
-            $history->from_status = $oldStatus;
-            $history->to_status = $newStatus;
-            $history->remarks = $historyRemarks;
-            $history->created_by = $user->id;
-            $history->save();
-        }
-
-        \DB::commit();
-
-        return redirect()
-            ->route('repair-requests.show', $repairRequest->id)
-            ->with('success', $verifierLabel.' verification saved and request returned to Storekeeper.');
-
-    } catch (\Exception $e) {
-        \DB::rollBack();
-
-        return redirect()
-            ->back()
-            ->withInput()
-            ->with('error', 'Verification could not be saved: '.$e->getMessage());
-    }
-}
-
 }

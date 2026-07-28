@@ -164,8 +164,13 @@ strong {
 
 @if(empty($pdfMode))
     <div class="no-print">
-        <button type="button" onclick="window.print()">Print</button>
-        <button type="button" onclick="window.close()">Close</button>
+        <button type="button" onclick="window.print()">
+            Print
+        </button>
+
+        <button type="button" onclick="window.close()">
+            Close
+        </button>
     </div>
 @endif
 @php
