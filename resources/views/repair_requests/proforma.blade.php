@@ -19,13 +19,21 @@
         }
 
         body {
-            font-family: DejaVu Sans, Arial, sans-serif;
+                font-family: "DejaVu Sans", sans-serif;
             font-size: 13px;
             color: #000;
             margin: 0;
             padding: 0;
         }
-
+button,
+table,
+th,
+td,
+div,
+span,
+strong {
+    font-family: "DejaVu Sans", sans-serif;
+}
         .page {
             width: 100%;
             margin: 0 auto;
