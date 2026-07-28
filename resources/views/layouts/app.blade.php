@@ -150,7 +150,9 @@
                             <a class="dropdown-item" href="{{ route('assets.index') }}">Assets</a>
                             @if($canManageStore)
                                 <a class="dropdown-item" href="{{ route('assets.create') }}">Add Asset</a>
-                            @endif
+                                <a class="dropdown-item" href="{{ route('masters.vendors') }}">Vendors</a>
+
+                                @endif
                         </div>
                     </li>
 
