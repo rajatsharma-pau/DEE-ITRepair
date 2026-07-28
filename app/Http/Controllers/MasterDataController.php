@@ -18,9 +18,30 @@ class MasterDataController extends Controller
 {
     public function __construct()
     {
-        $this->middleware(['auth','role:admin,college_admin,department_admin,director']);
-    }
+        $this->middleware('auth');
 
+        // Admin-level master data
+        $this->middleware(
+            'role:admin,college_admin,department_admin,director',
+            [
+                'except' => [
+                    'vendors',
+                    'storeVendor',
+                ]
+            ]
+        );
+
+        // Vendor access: Storekeeper can view and add vendors
+        $this->middleware(
+            'role:admin,college_admin,department_admin,director,storekeeper',
+            [
+                'only' => [
+                    'vendors',
+                    'storeVendor',
+                ]
+            ]
+        );
+    }
 
     public function colleges()
     {
@@ -37,7 +58,7 @@ class MasterDataController extends Controller
         ]);
         $data['is_active'] = $request->has('is_active');
         College::create($data);
-        return back()->with('success','College / Directorate added.');
+        return back()->with('success', 'College / Directorate added.');
     }
 
     public function departments()
@@ -49,7 +70,7 @@ class MasterDataController extends Controller
             ->get();
 
         $colleges = AccessScope::colleges();
-        return view('masters.departments', compact('items','colleges'));
+        return view('masters.departments', compact('items', 'colleges'));
     }
 
     public function storeDepartment(Request $request)
@@ -62,7 +83,7 @@ class MasterDataController extends Controller
         ]);
         $data['is_active'] = $request->has('is_active');
         Department::create($data);
-        return back()->with('success','Department / Office / KVK added.');
+        return back()->with('success', 'Department / Office / KVK added.');
     }
 
     public function designations()
@@ -73,18 +94,18 @@ class MasterDataController extends Controller
 
     public function storeDesignation(Request $request)
     {
-        $data = $request->validate(['name'=>'required|string|max:255','cadre'=>'nullable|string|max:255','sort_order'=>'nullable|integer','is_active'=>'nullable']);
+        $data = $request->validate(['name' => 'required|string|max:255', 'cadre' => 'nullable|string|max:255', 'sort_order' => 'nullable|integer', 'is_active' => 'nullable']);
         $data['is_active'] = $request->has('is_active');
         Designation::create($data);
-        return back()->with('success','Designation added.');
+        return back()->with('success', 'Designation added.');
     }
 
     public function sections()
     {
-        $items = Section::with(['college','department'])->orderBy('name')->get();
+        $items = Section::with(['college', 'department'])->orderBy('name')->get();
         $colleges = College::where('is_active', 1)->orderBy('name')->get();
         $departments = Department::where('is_active', 1)->orderBy('name')->get();
-        return view('masters.sections', compact('items','colleges','departments'));
+        return view('masters.sections', compact('items', 'colleges', 'departments'));
     }
 
     public function storeSection(Request $request)
@@ -106,7 +127,7 @@ class MasterDataController extends Controller
 
         $data['is_active'] = $request->has('is_active');
         Section::create($data);
-        return back()->with('success','Section added.');
+        return back()->with('success', 'Section added.');
     }
 
     public function vendors()
@@ -118,19 +139,19 @@ class MasterDataController extends Controller
     public function storeVendor(Request $request)
     {
         $data = $request->validate([
-            'name'=>'required|string|max:255',
-            'contact_person'=>'nullable|string|max:255',
-            'mobile'=>'nullable|string|max:20',
-            'email'=>'nullable|email|max:255',
-            'address'=>'nullable|string',
-            'gst_no'=>'nullable|string|max:50',
-            'pan_no'=>'nullable|string|max:50',
-            'vendor_type'=>'required|in:Computer,Electrical,Furniture,General,Other',
-            'is_active'=>'nullable',
+            'name' => 'required|string|max:255',
+            'contact_person' => 'nullable|string|max:255',
+            'mobile' => 'nullable|string|max:20',
+            'email' => 'nullable|email|max:255',
+            'address' => 'nullable|string',
+            'gst_no' => 'nullable|string|max:50',
+            'pan_no' => 'nullable|string|max:50',
+            'vendor_type' => 'required|in:Computer,Electrical,Furniture,General,Other',
+            'is_active' => 'nullable',
         ]);
         $data['is_active'] = $request->has('is_active');
         Vendor::create($data);
-        return back()->with('success','Vendor added.');
+        return back()->with('success', 'Vendor added.');
     }
 
     public function repairCategories()
@@ -141,10 +162,10 @@ class MasterDataController extends Controller
 
     public function storeRepairCategory(Request $request)
     {
-        $data = $request->validate(['name'=>'required|string|max:255','item_group'=>'required|in:Computer Related,Non Computer,General','default_handler'=>'required|in:programmer,storekeeper,store_incharge,director','is_active'=>'nullable']);
+        $data = $request->validate(['name' => 'required|string|max:255', 'item_group' => 'required|in:Computer Related,Non Computer,General', 'default_handler' => 'required|in:programmer,storekeeper,store_incharge,director', 'is_active' => 'nullable']);
         $data['is_active'] = $request->has('is_active');
         RepairCategory::create($data);
-        return back()->with('success','Repair category added.');
+        return back()->with('success', 'Repair category added.');
     }
 
 
@@ -152,18 +173,18 @@ class MasterDataController extends Controller
     public function problemTemplates()
     {
         $items = ProblemTemplate::with('category')->orderBy('title')->get();
-        $categories = RepairCategory::where('is_active',1)->orderBy('item_group')->orderBy('name')->get();
-        return view('masters.problem_templates', compact('items','categories'));
+        $categories = RepairCategory::where('is_active', 1)->orderBy('item_group')->orderBy('name')->get();
+        return view('masters.problem_templates', compact('items', 'categories'));
     }
 
     public function storeProblemTemplate(Request $request)
     {
         $data = $request->validate([
-            'repair_category_id'=>'nullable|exists:repair_categories,id',
-            'title'=>'required|string|max:255',
-            'description'=>'nullable|string',
-            'item_group'=>'nullable|in:Computer Related,Non Computer,General',
-            'is_active'=>'nullable',
+            'repair_category_id' => 'nullable|exists:repair_categories,id',
+            'title' => 'required|string|max:255',
+            'description' => 'nullable|string',
+            'item_group' => 'nullable|in:Computer Related,Non Computer,General',
+            'is_active' => 'nullable',
         ]);
         $data['is_active'] = $request->has('is_active');
         if (!empty($data['repair_category_id'])) {
@@ -171,34 +192,34 @@ class MasterDataController extends Controller
             $data['item_group'] = $data['item_group'] ?: optional($category)->item_group;
         }
         ProblemTemplate::create($data);
-        return back()->with('success','Default problem / material requirement added.');
+        return back()->with('success', 'Default problem / material requirement added.');
     }
 
     public function routingRules()
     {
-        $items = RepairRoutingRule::with(['category','handlerEmployee'])->latest()->get();
-        $categories = RepairCategory::where('is_active',1)->orderBy('name')->get();
+        $items = RepairRoutingRule::with(['category', 'handlerEmployee'])->latest()->get();
+        $categories = RepairCategory::where('is_active', 1)->orderBy('name')->get();
         $employees = AccessScope::employeesQuery()->orderBy('first_name')->get();
-        return view('masters.routing_rules', compact('items','categories','employees'));
+        return view('masters.routing_rules', compact('items', 'categories', 'employees'));
     }
 
     public function storeRoutingRule(Request $request)
     {
         $data = $request->validate([
-            'repair_category_id'=>'required|exists:repair_categories,id',
-            'handler_type'=>'required|in:role,charge,employee',
-            'handler_value'=>'nullable|string|max:255',
-            'handler_employee_id'=>'nullable|exists:employees,id',
-            'requires_store_verification'=>'nullable',
-            'requires_store_incharge_approval'=>'nullable',
-            'requires_programmer_verification'=>'nullable',
-            'is_active'=>'nullable',
+            'repair_category_id' => 'required|exists:repair_categories,id',
+            'handler_type' => 'required|in:role,charge,employee',
+            'handler_value' => 'nullable|string|max:255',
+            'handler_employee_id' => 'nullable|exists:employees,id',
+            'requires_store_verification' => 'nullable',
+            'requires_store_incharge_approval' => 'nullable',
+            'requires_programmer_verification' => 'nullable',
+            'is_active' => 'nullable',
         ]);
         $data['requires_store_verification'] = $request->has('requires_store_verification');
         $data['requires_store_incharge_approval'] = $request->has('requires_store_incharge_approval');
         $data['requires_programmer_verification'] = $request->has('requires_programmer_verification');
         $data['is_active'] = $request->has('is_active');
         RepairRoutingRule::create($data);
-        return back()->with('success','Routing rule added.');
+        return back()->with('success', 'Routing rule added.');
     }
 }
