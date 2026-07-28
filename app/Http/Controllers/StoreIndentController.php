@@ -37,13 +37,21 @@ class StoreIndentController extends Controller
         return view('store_indents.index', compact('indents'));
     }
 
-    public function create()
-    {
-        $items = AccessScope::apply(StoreItem::where('is_active',1))->orderBy('name')->get();
-        $requiredDate = date('Y-m-d');
+  
+        public function create()
+{
+    $departmentId = AccessScope::departmentId();
 
-        return view('store_indents.create', compact('items', 'requiredDate'));
-    }
+    $items = StoreItem::where('is_active', 1)
+        ->where('department_id', $departmentId)
+        ->orderBy('name')
+        ->get();
+
+    $requiredDate = date('Y-m-d');
+
+    return view('store_indents.create', compact('items', 'requiredDate'));
+}
+      
 
     public function store(Request $request)
     {
