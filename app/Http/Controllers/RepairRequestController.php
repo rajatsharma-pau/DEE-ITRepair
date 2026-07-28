@@ -791,52 +791,75 @@ public function proforma(RepairRequest $repair_request)
     |--------------------------------------------------------------------------
     */
     try {
-        $mergedPdf = new Fpdi();
+    $mergedPdf = new \setasign\Fpdi\Fpdi();
 
-        // Page 1: Financial sanction proforma
-        $this->appendPdfPages(
-            $mergedPdf,
-            $proformaPath
+    // First page: generated financial sanction proforma
+    $this->appendPdfPages($mergedPdf, $proformaPath);
+
+    // Remaining pages: selected vendor estimate
+    $this->appendPdfPages($mergedPdf, $estimatePath);
+
+    /*
+     * For older FPDF/FPDI versions:
+     * Output(filename, destination)
+     */
+    $mergedContent = $mergedPdf->Output('', 'S');
+
+    @unlink($proformaPath);
+
+    $fileName = 'repair-proforma-with-estimate-'
+        .$repair_request->id
+        .'.pdf';
+
+    /*
+     * Remove any warning, notice, whitespace or HTML output.
+     */
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
+
+    return response($mergedContent, 200, [
+        'Content-Type' => 'application/pdf',
+        'Content-Disposition' => 'inline; filename="'.$fileName.'"',
+        'Content-Length' => strlen($mergedContent),
+        'Cache-Control' => 'private, no-store, no-cache, must-revalidate',
+        'Pragma' => 'no-cache',
+        'X-Content-Type-Options' => 'nosniff',
+    ]);
+
+} catch (\Exception $e) {
+    @unlink($proformaPath);
+
+    \Log::error('Repair proforma PDF merge failed', [
+        'repair_request_id' => $repair_request->id,
+        'proforma_path' => $proformaPath,
+        'estimate_path' => $estimatePath,
+        'error' => $e->getMessage(),
+        'trace' => $e->getTraceAsString(),
+    ]);
+
+    return redirect()
+        ->route('repair-requests.show', $repair_request)
+        ->withErrors(
+            'PDF merge failed: '.$e->getMessage()
         );
-
-        // Page 2 onward: Vendor estimate
-        $this->appendPdfPages(
-            $mergedPdf,
-            $estimatePath
-        );
-
-        $mergedContent = $mergedPdf->Output('S');
-
-        @unlink($proformaPath);
-
-        $fileName = 'repair-proforma-with-estimate-'
-            .$repair_request->id
-            .'.pdf';
-
-       return response($mergedContent, 200, [
-    'Content-Type' => 'application/pdf',
-    'Content-Disposition' =>
-        'inline; filename="'.$fileName.'"',
-    'Content-Length' => strlen($mergedContent),
-    'Content-Language' => 'en',
-    'Cache-Control' =>
-        'private, no-store, no-cache, must-revalidate',
-    'Pragma' => 'no-cache',
-]);
-    } catch (\Exception $e) {
-        /*
-         * Some secured/encrypted PDFs may not be readable by FPDI.
-         * In that case, return the proforma rather than showing a 500 error.
-         */
-        @unlink($proformaPath);
-
-        return $proformaPdf->stream(
-            'repair-proforma-'.$repair_request->id.'.pdf'
+}
+}private function appendPdfPages(
+    \setasign\Fpdi\Fpdi $mergedPdf,
+    $sourcePath
+) {
+    if (!$sourcePath || !file_exists($sourcePath)) {
+        throw new \Exception(
+            'PDF file was not found: '.$sourcePath
         );
     }
-}
-private function appendPdfPages(Fpdi $mergedPdf, $sourcePath)
-{
+
+    if (!is_readable($sourcePath)) {
+        throw new \Exception(
+            'PDF file is not readable: '.$sourcePath
+        );
+    }
+
     $pageCount = $mergedPdf->setSourceFile($sourcePath);
 
     for ($pageNumber = 1; $pageNumber <= $pageCount; $pageNumber++) {
@@ -865,7 +888,7 @@ private function appendPdfPages(Fpdi $mergedPdf, $sourcePath)
             $pageSize['height']
         );
     }
-}   
+}
     private function generateRequestNo()
     {
         $year = date('Y');
