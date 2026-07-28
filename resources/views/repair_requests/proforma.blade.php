@@ -2,40 +2,162 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Request-cum-Financial Sanction Proforma - {{ $request->request_no }}</title>
+
+    <title>
+        Request-cum-Financial Sanction Proforma -
+        {{ $request->request_no }}
+    </title>
+
     <style>
-        body { font-family: Arial, sans-serif; font-size: 15px; color: #000; }
-        .page { width: 820px; margin: 24px auto; padding: 28px 34px; }
-        .no-print { text-align:center; margin:15px; }
-        .center { text-align:center; }
-        .office-title { font-size:18px; font-weight:bold; line-height:1.45; letter-spacing:.4px; }
-        .doc-title { margin-top:18px; font-size:17px; font-weight:bold; text-decoration:underline; }
-        .top-row { width:100%; margin-top:24px; border-collapse:collapse; }
-        .top-row td { padding:4px 0; }
-        .subject { margin-top:22px; line-height:1.7; font-weight:bold; }
-        .para { margin-top:18px; line-height:1.95; text-align:justify; }
-        .details { width:100%; margin-top:18px; border-collapse:collapse; }
-        .details th, .details td { border:1px solid #000; padding:8px 9px; vertical-align:top; }
-        .details th { width:28%; text-align:left; background:#f5f5f5; }
-        .encl { margin-top:18px; line-height:1.8; }
-        .note { margin-top:14px; font-size:13px; line-height:1.6; }
-        .sign-table { width:100%; margin-top:70px; border-collapse:collapse; }
-        .sign-table td { width:20%; text-align:center; padding-top:38px; vertical-align:bottom; }
-        .line { border-top:1px solid #000; display:inline-block; width:125px; padding-top:6px; }
+        @page {
+            size: A4 portrait;
+            margin: 12mm;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: DejaVu Sans, Arial, sans-serif;
+            font-size: 13px;
+            color: #000;
+            margin: 0;
+            padding: 0;
+        }
+
+        .page {
+            width: 100%;
+            margin: 0 auto;
+            padding: 0;
+            page-break-inside: avoid;
+        }
+
+        .no-print {
+            text-align: center;
+            margin: 15px;
+        }
+
+        .center {
+            text-align: center;
+        }
+
+        .office-title {
+            font-size: 17px;
+            font-weight: bold;
+            line-height: 1.4;
+            letter-spacing: .3px;
+        }
+
+        .doc-title {
+            margin-top: 14px;
+            font-size: 16px;
+            font-weight: bold;
+            text-decoration: underline;
+        }
+
+        .top-row {
+            width: 100%;
+            margin-top: 20px;
+            border-collapse: collapse;
+        }
+
+        .top-row td {
+            padding: 4px 0;
+        }
+
+        .subject {
+            margin-top: 18px;
+            line-height: 1.55;
+            font-weight: bold;
+        }
+
+        .para {
+            margin-top: 14px;
+            line-height: 1.65;
+            text-align: justify;
+        }
+
+        .details {
+            width: 100%;
+            margin-top: 14px;
+            border-collapse: collapse;
+        }
+
+        .details th,
+        .details td {
+            border: 1px solid #000;
+            padding: 6px 7px;
+            vertical-align: top;
+        }
+
+        .details th {
+            width: 28%;
+            text-align: left;
+            background: #f5f5f5;
+        }
+
+        .encl {
+            margin-top: 14px;
+            line-height: 1.6;
+        }
+
+        .note {
+            margin-top: 10px;
+            font-size: 11px;
+            line-height: 1.45;
+        }
+
+        .sign-table {
+            width: 100%;
+            margin-top: 50px;
+            border-collapse: collapse;
+        }
+
+        .sign-table td {
+            width: 20%;
+            text-align: center;
+            padding-top: 30px;
+            vertical-align: bottom;
+        }
+
+        .line {
+            border-top: 1px solid #000;
+            display: inline-block;
+            width: 105px;
+            padding-top: 5px;
+        }
+
         @media print {
-            .no-print { display:none; }
-            .page { margin:0 auto; padding:10px 22px; }
-            body { margin:0; }
-            .details th { background:#fff; }
+            .no-print {
+                display: none;
+            }
+
+            body {
+                margin: 0;
+            }
+
+            .page {
+                width: 100%;
+                margin: 0;
+                padding: 0;
+            }
+
+            .details th {
+                background: #fff;
+            }
         }
     </style>
 </head>
-<body>
-<div class="no-print">
-    <button onclick="window.print()">Print</button>
-    <button onclick="window.close()">Close</button>
-</div>
 
+<body>
+
+@if(empty($pdfMode))
+    <div class="no-print">
+        <button type="button" onclick="window.print()">Print</button>
+        <button type="button" onclick="window.close()">Close</button>
+    </div>
+@endif
 @php
     $amount = $request->proforma_amount;
     $amountText = $amount ? number_format($amount, 2) : '____________';

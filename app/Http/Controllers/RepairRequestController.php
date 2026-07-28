@@ -14,7 +14,8 @@ use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use App\Support\AccessScope;
-
+use Barryvdh\DomPDF\Facade as PDF;
+use setasign\Fpdi\Fpdi;
 class RepairRequestController extends Controller
 {
     public function __construct()
@@ -664,25 +665,206 @@ if (!$user->hasRole('superuser') && !$user->hasRole('admin') && !$user->hasRole(
         $this->log($repair_request, 'Employee Feedback', $old, $repair_request->status, $data['employee_feedback']);
         return back()->with('success', 'Feedback submitted.');
     }
+public function proforma(RepairRequest $repair_request)
+{
+    $this->authorizeView($repair_request);
 
-    public function proforma(RepairRequest $repair_request)
-    {
-        $this->authorizeView($repair_request);
-        $repair_request->load(['employee.department','department','category','asset','assignedTo','storekeeper','programmer','proformaGeneratedBy','selectedEstimate.vendor','selectedEstimate.programmer']);
+    $repair_request->load([
+        'employee.department',
+        'department',
+        'category',
+        'asset',
+        'assignedTo',
+        'storekeeper',
+        'programmer',
+        'proformaGeneratedBy',
+        'selectedEstimate.vendor',
+        'selectedEstimate.programmer'
+    ]);
 
-        if ($repair_request->programmer_estimate_status != 'Estimate OK' || !$repair_request->selectedEstimate) {
-            return redirect()->route('repair-requests.show', $repair_request)
-                ->withErrors('Financial Sanction Proforma can be printed only after Programmer / Store Incharge verifies the selected estimate as OK.');
-        }
-
-        if (!$repair_request->proforma_generated_at) {
-            $this->prepareProformaFromEstimate($repair_request);
-            $repair_request->save();
-        }
-
-        return view('repair_requests.proforma', ['request' => $repair_request]);
+    if (
+        $repair_request->programmer_estimate_status != 'Estimate OK'
+        || !$repair_request->selectedEstimate
+    ) {
+        return redirect()
+            ->route('repair-requests.show', $repair_request)
+            ->withErrors(
+                'Financial Sanction Proforma can be printed only after Programmer / Store Incharge verifies the selected estimate as OK.'
+            );
     }
 
+    if (!$repair_request->proforma_generated_at) {
+        $this->prepareProformaFromEstimate($repair_request);
+        $repair_request->save();
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Generate proforma PDF
+    |--------------------------------------------------------------------------
+    */
+    $proformaPdf = PDF::loadView(
+        'repair_requests.proforma',
+        [
+            'request' => $repair_request,
+            'pdfMode' => true,
+        ]
+    )->setPaper('a4', 'portrait');
+
+    /*
+    |--------------------------------------------------------------------------
+    | Create temporary proforma PDF file
+    |--------------------------------------------------------------------------
+    */
+    $temporaryDirectory = storage_path('app/temp');
+
+    if (!is_dir($temporaryDirectory)) {
+        mkdir($temporaryDirectory, 0775, true);
+    }
+
+    $uniqueName = 'repair_proforma_'
+        . $repair_request->id
+        . '_'
+        . uniqid();
+
+    $proformaPath = $temporaryDirectory.'/'.$uniqueName.'.pdf';
+
+    file_put_contents(
+        $proformaPath,
+        $proformaPdf->output()
+    );
+
+    /*
+    |--------------------------------------------------------------------------
+    | Locate selected estimate PDF
+    |--------------------------------------------------------------------------
+    | estimate_file is saved using:
+    | store('vendor_estimates', 'public')
+    |--------------------------------------------------------------------------
+    */
+    $selectedEstimate = $repair_request->selectedEstimate;
+    $estimatePath = null;
+
+    if (
+        $selectedEstimate
+        && !empty($selectedEstimate->estimate_file)
+    ) {
+        $estimateRelativePath = ltrim(
+            $selectedEstimate->estimate_file,
+            '/'
+        );
+
+        // Handle a database value beginning with "storage/".
+        $estimateRelativePath = preg_replace(
+            '#^storage/#',
+            '',
+            $estimateRelativePath
+        );
+
+        $estimatePath = storage_path(
+            'app/public/'.$estimateRelativePath
+        );
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | If estimate PDF is missing, return proforma only
+    |--------------------------------------------------------------------------
+    */
+    $validEstimatePdf =
+        $estimatePath
+        && file_exists($estimatePath)
+        && is_readable($estimatePath)
+        && strtolower(pathinfo($estimatePath, PATHINFO_EXTENSION)) === 'pdf';
+
+    if (!$validEstimatePdf) {
+        @unlink($proformaPath);
+
+        return $proformaPdf->stream(
+            'repair-proforma-'.$repair_request->id.'.pdf'
+        );
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Merge proforma and vendor estimate
+    |--------------------------------------------------------------------------
+    */
+    try {
+        $mergedPdf = new Fpdi();
+
+        // Page 1: Financial sanction proforma
+        $this->appendPdfPages(
+            $mergedPdf,
+            $proformaPath
+        );
+
+        // Page 2 onward: Vendor estimate
+        $this->appendPdfPages(
+            $mergedPdf,
+            $estimatePath
+        );
+
+        $mergedContent = $mergedPdf->Output('S');
+
+        @unlink($proformaPath);
+
+        $fileName = 'repair-proforma-with-estimate-'
+            .$repair_request->id
+            .'.pdf';
+
+        return response($mergedContent, 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' =>
+                'inline; filename="'.$fileName.'"',
+            'Content-Length' => strlen($mergedContent),
+            'Cache-Control' =>
+                'private, no-store, no-cache, must-revalidate',
+            'Pragma' => 'no-cache',
+        ]);
+    } catch (\Exception $e) {
+        /*
+         * Some secured/encrypted PDFs may not be readable by FPDI.
+         * In that case, return the proforma rather than showing a 500 error.
+         */
+        @unlink($proformaPath);
+
+        return $proformaPdf->stream(
+            'repair-proforma-'.$repair_request->id.'.pdf'
+        );
+    }
+}
+private function appendPdfPages(Fpdi $mergedPdf, $sourcePath)
+{
+    $pageCount = $mergedPdf->setSourceFile($sourcePath);
+
+    for ($pageNumber = 1; $pageNumber <= $pageCount; $pageNumber++) {
+        $templateId = $mergedPdf->importPage($pageNumber);
+
+        $pageSize = $mergedPdf->getTemplateSize($templateId);
+
+        $orientation =
+            $pageSize['width'] > $pageSize['height']
+                ? 'L'
+                : 'P';
+
+        $mergedPdf->AddPage(
+            $orientation,
+            [
+                $pageSize['width'],
+                $pageSize['height'],
+            ]
+        );
+
+        $mergedPdf->useTemplate(
+            $templateId,
+            0,
+            0,
+            $pageSize['width'],
+            $pageSize['height']
+        );
+    }
+}   
     private function generateRequestNo()
     {
         $year = date('Y');
