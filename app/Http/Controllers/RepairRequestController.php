@@ -17,6 +17,7 @@ use App\Support\AccessScope;
 use Barryvdh\DomPDF\Facade as PDF;
 use setasign\Fpdi\Fpdi;
 use Illuminate\Support\Facades\Log;
+
 class RepairRequestController extends Controller
 {
     public function __construct()
@@ -669,490 +670,392 @@ class RepairRequestController extends Controller
         return back()->with('success', 'Feedback submitted.');
     }
     public function proforma(RepairRequest $repair_request)
-{
-    $repair_request->load([
-        'employee.department',
-        'department',
-        'category',
-        'selectedEstimate.vendor',
-        'selectedEstimate.programmer',
-        'programmer',
-    ]);
-
-    /*
-     * Make sure a selected estimate exists.
-     */
-    if (!$repair_request->selectedEstimate) {
-        return redirect()
-            ->back()
-            ->withErrors(
-                'No vendor estimate has been selected for this request.'
-            );
-    }
-
-    $estimateFile = $repair_request
-        ->selectedEstimate
-        ->estimate_file;
-
-    if (!$estimateFile) {
-        return redirect()
-            ->back()
-            ->withErrors(
-                'The selected estimate does not contain a PDF file.'
-            );
-    }
-
-    /*
-     * Database normally contains:
-     * vendor_estimates/filename.pdf
-     */
-    $estimateFile = str_replace('\\', '/', $estimateFile);
-    $estimateFile = ltrim($estimateFile, '/');
-
-    /*
-     * Remove optional prefixes if they were saved in the database.
-     */
-    if (strpos($estimateFile, 'storage/') === 0) {
-        $estimateFile = substr($estimateFile, strlen('storage/'));
-    }
-
-    if (strpos($estimateFile, 'public/') === 0) {
-        $estimateFile = substr($estimateFile, strlen('public/'));
-    }
-
-    $estimatePath = storage_path(
-        'app/public/'.$estimateFile
-    );
-
-    if (!file_exists($estimatePath)) {
-        Log::error('Estimate PDF file not found', [
-            'repair_request_id' => $repair_request->id,
-            'database_file'     => $repair_request
-                ->selectedEstimate
-                ->estimate_file,
-            'resolved_path'     => $estimatePath,
+    {
+        $repair_request->load([
+            'employee.department',
+            'department',
+            'category',
+            'selectedEstimate.vendor',
+            'selectedEstimate.programmer',
+            'programmer',
         ]);
 
-        return redirect()
-            ->back()
-            ->withErrors(
-                'Estimate PDF file was not found on the server.'
-            );
-    }
-
-    if (!is_readable($estimatePath)) {
-        return redirect()
-            ->back()
-            ->withErrors(
-                'Estimate PDF exists but is not readable by the server.'
-            );
-    }
-
-    /*
-     * Temporary folder used for PDF generation and conversion.
+        /*
+     * Make sure a selected estimate exists.
      */
-    $temporaryDirectory = storage_path(
-        'app/temp/repair_pdf_merge'
-    );
-
-    if (!is_dir($temporaryDirectory)) {
-        if (
-            !mkdir($temporaryDirectory, 0775, true)
-            && !is_dir($temporaryDirectory)
-        ) {
+        if (!$repair_request->selectedEstimate) {
             return redirect()
                 ->back()
                 ->withErrors(
-                    'Unable to create the temporary PDF directory.'
+                    'No vendor estimate has been selected for this request.'
                 );
         }
-    }
 
-    $uniqueName = 'request_'
-        .$repair_request->id
-        .'_'
-        .uniqid();
+        $estimateFile = $repair_request
+            ->selectedEstimate
+            ->estimate_file;
 
-    $originalProformaPath = $temporaryDirectory
-        .'/'.$uniqueName.'_proforma_original.pdf';
+        if (!$estimateFile) {
+            return redirect()
+                ->back()
+                ->withErrors(
+                    'The selected estimate does not contain a PDF file.'
+                );
+        }
 
-    $compatibleProformaPath = $temporaryDirectory
-        .'/'.$uniqueName.'_proforma_compatible.pdf';
-
-    $compatibleEstimatePath = $temporaryDirectory
-        .'/'.$uniqueName.'_estimate_compatible.pdf';
-
-    try {
         /*
+     * Database normally contains:
+     * vendor_estimates/filename.pdf
+     */
+        $estimateFile = str_replace('\\', '/', $estimateFile);
+        $estimateFile = ltrim($estimateFile, '/');
+
+        /*
+     * Remove optional prefixes if they were saved in the database.
+     */
+        if (strpos($estimateFile, 'storage/') === 0) {
+            $estimateFile = substr($estimateFile, strlen('storage/'));
+        }
+
+        if (strpos($estimateFile, 'public/') === 0) {
+            $estimateFile = substr($estimateFile, strlen('public/'));
+        }
+
+        $estimatePath = storage_path(
+            'app/public/' . $estimateFile
+        );
+
+        if (!file_exists($estimatePath)) {
+            Log::error('Estimate PDF file not found', [
+                'repair_request_id' => $repair_request->id,
+                'database_file'     => $repair_request
+                    ->selectedEstimate
+                    ->estimate_file,
+                'resolved_path'     => $estimatePath,
+            ]);
+
+            return redirect()
+                ->back()
+                ->withErrors(
+                    'Estimate PDF file was not found on the server.'
+                );
+        }
+
+        if (!is_readable($estimatePath)) {
+            return redirect()
+                ->back()
+                ->withErrors(
+                    'Estimate PDF exists but is not readable by the server.'
+                );
+        }
+
+        /*
+     * Temporary folder used for PDF generation and conversion.
+     */
+        $temporaryDirectory = storage_path(
+            'app/temp/repair_pdf_merge'
+        );
+
+        if (!is_dir($temporaryDirectory)) {
+            if (
+                !mkdir($temporaryDirectory, 0775, true)
+                && !is_dir($temporaryDirectory)
+            ) {
+                return redirect()
+                    ->back()
+                    ->withErrors(
+                        'Unable to create the temporary PDF directory.'
+                    );
+            }
+        }
+
+        $uniqueName = 'request_'
+            . $repair_request->id
+            . '_'
+            . uniqid();
+
+        $originalProformaPath = $temporaryDirectory
+            . '/' . $uniqueName . '_proforma_original.pdf';
+
+        $compatibleProformaPath = $temporaryDirectory
+            . '/' . $uniqueName . '_proforma_compatible.pdf';
+
+        $compatibleEstimatePath = $temporaryDirectory
+            . '/' . $uniqueName . '_estimate_compatible.pdf';
+
+        try {
+            /*
          * -------------------------------------------------
          * STEP 1: Generate sanction proforma using Dompdf
          * -------------------------------------------------
          */
-        $proformaPdf = PDF::loadView(
-            'repair_requests.proforma',
-            [
-                'request' => $repair_request,
-                'pdfMode' => true,
-            ]
-        )->setPaper('a4', 'portrait');
+            $proformaPdf = PDF::loadView(
+                'repair_requests.proforma',
+                [
+                    'request' => $repair_request,
+                    'pdfMode' => true,
+                ]
+            )->setPaper('a4', 'portrait');
 
-        $proformaContent = $proformaPdf->output();
+            $proformaContent = $proformaPdf->output();
 
-        if (!$proformaContent) {
-            throw new \Exception(
-                'The financial sanction proforma could not be generated.'
+            if (!$proformaContent) {
+                throw new \Exception(
+                    'The financial sanction proforma could not be generated.'
+                );
+            }
+
+            $writtenBytes = file_put_contents(
+                $originalProformaPath,
+                $proformaContent
             );
-        }
 
-        $writtenBytes = file_put_contents(
-            $originalProformaPath,
-            $proformaContent
-        );
+            if (
+                $writtenBytes === false
+                || !file_exists($originalProformaPath)
+                || filesize($originalProformaPath) === 0
+            ) {
+                throw new \Exception(
+                    'The generated proforma PDF could not be saved temporarily.'
+                );
+            }
 
-        if (
-            $writtenBytes === false
-            || !file_exists($originalProformaPath)
-            || filesize($originalProformaPath) === 0
-        ) {
-            throw new \Exception(
-                'The generated proforma PDF could not be saved temporarily.'
-            );
-        }
-
-        /*
+            /*
          * -------------------------------------------------
          * STEP 2: Convert both PDFs into FPDI-compatible PDFs
          * -------------------------------------------------
          */
-        $this->makePdfFpdiCompatible(
-            $originalProformaPath,
-            $compatibleProformaPath
-        );
+            $this->makePdfFpdiCompatible(
+                $originalProformaPath,
+                $compatibleProformaPath
+            );
 
-        $this->makePdfFpdiCompatible(
-            $estimatePath,
-            $compatibleEstimatePath
-        );
+            $this->makePdfFpdiCompatible(
+                $estimatePath,
+                $compatibleEstimatePath
+            );
 
-        /*
+            /*
          * -------------------------------------------------
          * STEP 3: Merge both PDFs
          * -------------------------------------------------
          */
-        $mergedPdf = new Fpdi();
+            $mergedPdf = new Fpdi();
 
-        /*
+            /*
          * Page 1: Financial sanction proforma
          */
-        $this->appendPdfPages(
-            $mergedPdf,
-            $compatibleProformaPath
-        );
+            $this->appendPdfPages(
+                $mergedPdf,
+                $compatibleProformaPath
+            );
 
-        /*
+            /*
          * Page 2 onwards: Vendor estimate
          */
-        $this->appendPdfPages(
-            $mergedPdf,
-            $compatibleEstimatePath
-        );
+            $this->appendPdfPages(
+                $mergedPdf,
+                $compatibleEstimatePath
+            );
 
-        /*
+            /*
          * Return merged PDF as a string.
          *
          * For setasign/fpdf 1.8+, destination "S"
          * returns the PDF as a string.
          */
-        $mergedContent = $mergedPdf->Output('S');
+            $mergedContent = $mergedPdf->Output('S');
 
-        if (!$mergedContent) {
-            throw new \Exception(
-                'The merged PDF could not be generated.'
-            );
-        }
+            if (!$mergedContent) {
+                throw new \Exception(
+                    'The merged PDF could not be generated.'
+                );
+            }
 
-        $fileName = 'financial-sanction-'
-            .$repair_request->request_no
-            .'.pdf';
+            $fileName = 'financial-sanction-'
+                . $repair_request->request_no
+                . '.pdf';
 
-        /*
+            /*
          * Keep filename safe for the response header.
          */
-        $fileName = preg_replace(
-            '/[^A-Za-z0-9._-]/',
-            '-',
-            $fileName
-        );
-
-        return response($mergedContent, 200, [
-            'Content-Type' => 'application/pdf',
-
-            'Content-Disposition' =>
-                'inline; filename="'.$fileName.'"',
-
-            'Content-Length' =>
-                strlen($mergedContent),
-
-            'Cache-Control' =>
-                'private, no-store, no-cache, must-revalidate',
-
-            'Pragma' => 'no-cache',
-
-            'Expires' => '0',
-
-            'X-Content-Type-Options' => 'nosniff',
-        ]);
-
-    } catch (\Throwable $e) {
-        Log::error('Repair request PDF merge failed', [
-            'repair_request_id' => $repair_request->id,
-            'request_no'        => $repair_request->request_no,
-            'estimate_path'     => $estimatePath,
-            'error'             => $e->getMessage(),
-            'file'              => $e->getFile(),
-            'line'              => $e->getLine(),
-            'trace'             => $e->getTraceAsString(),
-        ]);
-
-        return redirect()
-            ->back()
-            ->withErrors(
-                'PDF merge failed: '.$e->getMessage()
+            $fileName = preg_replace(
+                '/[^A-Za-z0-9._-]/',
+                '-',
+                $fileName
             );
 
-    } finally {
-        /*
+            return response($mergedContent, 200, [
+                'Content-Type' => 'application/pdf',
+
+                'Content-Disposition' =>
+                'inline; filename="' . $fileName . '"',
+
+                'Content-Length' =>
+                strlen($mergedContent),
+
+                'Cache-Control' =>
+                'private, no-store, no-cache, must-revalidate',
+
+                'Pragma' => 'no-cache',
+
+                'Expires' => '0',
+
+                'X-Content-Type-Options' => 'nosniff',
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('Repair request PDF merge failed', [
+                'repair_request_id' => $repair_request->id,
+                'request_no'        => $repair_request->request_no,
+                'estimate_path'     => $estimatePath,
+                'error'             => $e->getMessage(),
+                'file'              => $e->getFile(),
+                'line'              => $e->getLine(),
+                'trace'             => $e->getTraceAsString(),
+            ]);
+
+            return redirect()
+                ->back()
+                ->withErrors(
+                    'PDF merge failed: ' . $e->getMessage()
+                );
+        } finally {
+            /*
          * Delete only temporary files.
          * Never delete the original uploaded estimate.
          */
-        $temporaryFiles = [
-            $originalProformaPath,
-            $compatibleProformaPath,
-            $compatibleEstimatePath,
-        ];
+            $temporaryFiles = [
+                $originalProformaPath,
+                $compatibleProformaPath,
+                $compatibleEstimatePath,
+            ];
 
-        foreach ($temporaryFiles as $temporaryFile) {
-            if (
-                $temporaryFile
-                && file_exists($temporaryFile)
-            ) {
-                @unlink($temporaryFile);
+            foreach ($temporaryFiles as $temporaryFile) {
+                if (
+                    $temporaryFile
+                    && file_exists($temporaryFile)
+                ) {
+                    @unlink($temporaryFile);
+                }
             }
         }
     }
-}private function makePdfFpdiCompatible(
-    $sourcePath,
-    $destinationPath
-) {
-    if (!$sourcePath || !file_exists($sourcePath)) {
-        throw new \Exception(
-            'Source PDF was not found: '.$sourcePath
-        );
-    }
-
-    if (!is_readable($sourcePath)) {
-        throw new \Exception(
-            'Source PDF is not readable: '.$sourcePath
-        );
-    }
-
-    /*
-     * Confirm exec() is available.
-     */
-    if (!function_exists('exec')) {
-        throw new \Exception(
-            'The PHP exec function is disabled. '
-            .'It is required for qpdf conversion.'
-        );
-    }
-
-    /*
-     * Change this only if "which qpdf" returns another path.
-     */
-    $qpdfBinary = '/usr/bin/qpdf';
-
-    if (!file_exists($qpdfBinary)) {
-        throw new \Exception(
-            'qpdf was not found at '.$qpdfBinary
-            .'. Run "which qpdf" to find its location.'
-        );
-    }
-
-    $destinationDirectory = dirname($destinationPath);
-
-    if (!is_dir($destinationDirectory)) {
-        if (
-            !mkdir($destinationDirectory, 0775, true)
-            && !is_dir($destinationDirectory)
-        ) {
+    private function makePdfFpdiCompatible(
+        $sourcePath,
+        $destinationPath
+    ) {
+        if (!$sourcePath || !file_exists($sourcePath)) {
             throw new \Exception(
-                'Unable to create the PDF conversion directory.'
+                'Source PDF was not found: ' . $sourcePath
             );
         }
-    }
 
-    /*
-     * Remove an old temporary file if it exists.
-     */
-    if (file_exists($destinationPath)) {
-        @unlink($destinationPath);
-    }
+        if (!is_readable($sourcePath)) {
+            throw new \Exception(
+                'Source PDF is not readable: ' . $sourcePath
+            );
+        }
 
-    /*
-     * --object-streams=disable converts modern compressed
-     * object streams into a format supported by free FPDI.
-     *
-     * --warning-exit-0 prevents harmless qpdf warnings
-     * from being treated as complete failure.
-     */
-    $command = escapeshellarg($qpdfBinary)
-        .' --warning-exit-0'
-        .' --object-streams=disable'
-        .' '
-        .escapeshellarg($sourcePath)
-        .' '
-        .escapeshellarg($destinationPath)
-        .' 2>&1';
+        if (!function_exists('exec')) {
+            throw new \Exception(
+                'The PHP exec function is disabled.'
+            );
+        }
 
-    $commandOutput = [];
-    $exitCode = 0;
+        $qpdfBinary = '/usr/bin/qpdf';
 
-    exec(
-        $command,
-        $commandOutput,
-        $exitCode
-    );
+        if (!file_exists($qpdfBinary)) {
+            throw new \Exception(
+                'qpdf was not found at ' . $qpdfBinary
+            );
+        }
 
-    if (
-        $exitCode !== 0
-        || !file_exists($destinationPath)
-        || filesize($destinationPath) === 0
-    ) {
+        $destinationDirectory = dirname($destinationPath);
+
+        if (!is_dir($destinationDirectory)) {
+            if (
+                !mkdir($destinationDirectory, 0775, true)
+                && !is_dir($destinationDirectory)
+            ) {
+                throw new \Exception(
+                    'Unable to create the temporary PDF directory.'
+                );
+            }
+        }
+
         if (file_exists($destinationPath)) {
             @unlink($destinationPath);
         }
 
-        throw new \Exception(
-            'qpdf conversion failed. Exit code: '
-            .$exitCode
-            .'. Output: '
-            .implode(' ', $commandOutput)
-        );
-    }
-
-    /*
-     * Confirm the generated file is actually a PDF.
+        /*
+     * Compatible with older qpdf versions.
      */
-    $handle = fopen($destinationPath, 'rb');
+        $command = escapeshellarg($qpdfBinary)
+            . ' --object-streams=disable'
+            . ' '
+            . escapeshellarg($sourcePath)
+            . ' '
+            . escapeshellarg($destinationPath)
+            . ' 2>&1';
 
-    if ($handle === false) {
-        throw new \Exception(
-            'Unable to open the converted PDF.'
-        );
-    }
+        $commandOutput = [];
+        $exitCode = 0;
 
-    $pdfHeader = fread($handle, 5);
-    fclose($handle);
-
-    if ($pdfHeader !== '%PDF-') {
-        @unlink($destinationPath);
-
-        throw new \Exception(
-            'qpdf created an invalid PDF file.'
-        );
-    }
-
-    return $destinationPath;
-}
-    private function appendPdfPages(
-    Fpdi $mergedPdf,
-    $sourcePath
-) {
-    if (!$sourcePath || !file_exists($sourcePath)) {
-        throw new \Exception(
-            'PDF file was not found: '.$sourcePath
-        );
-    }
-
-    if (!is_readable($sourcePath)) {
-        throw new \Exception(
-            'PDF file is not readable: '.$sourcePath
-        );
-    }
-
-    try {
-        $pageCount = $mergedPdf->setSourceFile(
-            $sourcePath
+        exec(
+            $command,
+            $commandOutput,
+            $exitCode
         );
 
-        if ($pageCount < 1) {
-            throw new \Exception(
-                'The PDF does not contain any pages.'
-            );
-        }
+        /*
+     * qpdf normally returns:
+     * 0 = success
+     * 2 = error
+     * 3 = success with warnings on some versions
+     */
+        $conversionSucceeded =
+            file_exists($destinationPath)
+            && filesize($destinationPath) > 0;
 
-        for (
-            $pageNumber = 1;
-            $pageNumber <= $pageCount;
-            $pageNumber++
-        ) {
-            $templateId = $mergedPdf->importPage(
-                $pageNumber
-            );
-
-            $pageSize = $mergedPdf->getTemplateSize(
-                $templateId
-            );
-
-            if (
-                !$pageSize
-                || empty($pageSize['width'])
-                || empty($pageSize['height'])
-            ) {
-                throw new \Exception(
-                    'Unable to determine the size of PDF page '
-                    .$pageNumber
-                    .'.'
-                );
+        if (!$conversionSucceeded) {
+            if (file_exists($destinationPath)) {
+                @unlink($destinationPath);
             }
 
-            $orientation =
-                $pageSize['width'] > $pageSize['height']
-                    ? 'L'
-                    : 'P';
-
-            /*
-             * Preserve the original page dimensions.
-             */
-            $mergedPdf->AddPage(
-                $orientation,
-                [
-                    $pageSize['width'],
-                    $pageSize['height'],
-                ]
-            );
-
-            $mergedPdf->useTemplate(
-                $templateId,
-                0,
-                0,
-                $pageSize['width'],
-                $pageSize['height'],
-                true
+            throw new \Exception(
+                'qpdf conversion failed. Exit code: '
+                    . $exitCode
+                    . '. Output: '
+                    . implode(' ', $commandOutput)
             );
         }
 
-    } catch (\Throwable $e) {
-        throw new \Exception(
-            'Unable to import PDF pages from '
-            .basename($sourcePath)
-            .': '
-            .$e->getMessage(),
-            0,
-            $e
-        );
+        /*
+     * Validate PDF header.
+     */
+        $handle = fopen($destinationPath, 'rb');
+
+        if ($handle === false) {
+            @unlink($destinationPath);
+
+            throw new \Exception(
+                'Unable to open the converted PDF.'
+            );
+        }
+
+        $pdfHeader = fread($handle, 5);
+        fclose($handle);
+
+        if ($pdfHeader !== '%PDF-') {
+            @unlink($destinationPath);
+
+            throw new \Exception(
+                'qpdf created an invalid PDF file.'
+            );
+        }
+
+        return $destinationPath;
     }
-}
     private function generateRequestNo()
     {
         $year = date('Y');
