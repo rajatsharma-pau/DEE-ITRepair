@@ -1056,6 +1056,94 @@ class RepairRequestController extends Controller
 
         return $destinationPath;
     }
+    private function appendPdfPages(
+        Fpdi $mergedPdf,
+        $sourcePath
+    ) {
+        if (!$sourcePath || !file_exists($sourcePath)) {
+            throw new \Exception(
+                'PDF file was not found: ' . $sourcePath
+            );
+        }
+
+        if (!is_readable($sourcePath)) {
+            throw new \Exception(
+                'PDF file is not readable: ' . $sourcePath
+            );
+        }
+
+        try {
+            $pageCount = $mergedPdf->setSourceFile(
+                $sourcePath
+            );
+
+            if ($pageCount < 1) {
+                throw new \Exception(
+                    'The PDF does not contain any pages.'
+                );
+            }
+
+            for (
+                $pageNumber = 1;
+                $pageNumber <= $pageCount;
+                $pageNumber++
+            ) {
+                $templateId = $mergedPdf->importPage(
+                    $pageNumber
+                );
+
+                $pageSize = $mergedPdf->getTemplateSize(
+                    $templateId
+                );
+
+                if (
+                    !$pageSize
+                    || empty($pageSize['width'])
+                    || empty($pageSize['height'])
+                ) {
+                    throw new \Exception(
+                        'Unable to determine the size of PDF page '
+                            . $pageNumber
+                            . '.'
+                    );
+                }
+
+                $orientation =
+                    $pageSize['width'] > $pageSize['height']
+                    ? 'L'
+                    : 'P';
+
+                /*
+             * Preserve the original page dimensions.
+             */
+                $mergedPdf->AddPage(
+                    $orientation,
+                    [
+                        $pageSize['width'],
+                        $pageSize['height'],
+                    ]
+                );
+
+                $mergedPdf->useTemplate(
+                    $templateId,
+                    0,
+                    0,
+                    $pageSize['width'],
+                    $pageSize['height'],
+                    true
+                );
+            }
+        } catch (\Throwable $e) {
+            throw new \Exception(
+                'Unable to import PDF pages from '
+                    . basename($sourcePath)
+                    . ': '
+                    . $e->getMessage(),
+                0,
+                $e
+            );
+        }
+    }
     private function generateRequestNo()
     {
         $year = date('Y');
