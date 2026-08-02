@@ -186,18 +186,36 @@ class RepairRequestController extends Controller
         return view('repair_requests.create', compact('categories', 'assets', 'employees', 'employee', 'problemTemplates'));
     }
 
-    public function problemTemplatesByCategory(RepairCategory $category)
-    {
-        $items = ProblemTemplate::where('is_active', 1)
-            ->where(function ($q) use ($category) {
-                $q->where('repair_category_id', $category->id)
-                    ->orWhereNull('repair_category_id')
-                    ->orWhere('item_group', $category->item_group);
-            })
-            ->orderBy('title')
-            ->get(['id', 'title', 'description']);
-        return response()->json($items);
-    }
+   public function problemTemplatesByCategory(RepairCategory $category)
+{
+    $items = ProblemTemplate::where('is_active', 1)
+        ->where(function ($q) use ($category) {
+            $q->where('repair_category_id', $category->id)
+              ->orWhereNull('repair_category_id')
+              ->orWhere('item_group', $category->item_group);
+        })
+        ->orderBy('title_pa')
+        ->get([
+            'id',
+            'title',
+            'title_pa',
+            'description',
+            'description_pa',
+        ])
+        ->map(function ($item) {
+            return [
+                'id' => $item->id,
+
+                // Punjabi first, English fallback
+                'title' => $item->title_pa ?: $item->title,
+
+                'description' =>
+                    $item->description_pa ?: $item->description,
+            ];
+        });
+
+    return response()->json($items);
+}
 
     public function store(Request $request)
     {

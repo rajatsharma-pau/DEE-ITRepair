@@ -31,6 +31,23 @@
         <label>Description</label>
         <input name="description" class="form-control" placeholder="Detailed default text">
     </div>
+    <div class="form-group">
+    <label class="required">Title in Punjabi</label>
+
+    <input type="text"
+           name="title_pa"
+           class="form-control"
+           value="{{ old('title_pa') }}"
+           required>
+</div>
+
+<div class="form-group">
+    <label>Description in Punjabi</label>
+
+    <textarea name="description_pa"
+              class="form-control"
+              rows="3">{{ old('description_pa') }}</textarea>
+</div>
     <div class="col-md-1 form-group pt-4"><label><input type="checkbox" name="is_active" checked> Active</label></div>
 </div>
 <button class="btn btn-success">Add Default Problem</button>
