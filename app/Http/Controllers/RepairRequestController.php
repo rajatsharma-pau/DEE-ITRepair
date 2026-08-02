@@ -17,7 +17,7 @@ use App\Support\AccessScope;
 use Barryvdh\DomPDF\Facade as PDF;
 use setasign\Fpdi\Fpdi;
 use Illuminate\Support\Facades\Log;
-
+use Spatie\Browsershot\Browsershot;
 class RepairRequestController extends Controller
 {
     public function __construct()
@@ -789,36 +789,21 @@ class RepairRequestController extends Controller
          * STEP 1: Generate sanction proforma using Dompdf
          * -------------------------------------------------
          */
-            $proformaPdf = PDF::loadView(
-                'repair_requests.proforma',
-                [
-                    'request' => $repair_request,
-                    'pdfMode' => true,
-                ]
-            )->setPaper('a4', 'portrait');
+            $html = view(
+    'repair_requests.proforma',
+    [
+        'request' => $repair_request,
+        'pdfMode' => true,
+    ]
+)->render();
 
-            $proformaContent = $proformaPdf->output();
-
-            if (!$proformaContent) {
-                throw new \Exception(
-                    'The financial sanction proforma could not be generated.'
-                );
-            }
-
-            $writtenBytes = file_put_contents(
-                $originalProformaPath,
-                $proformaContent
-            );
-
-            if (
-                $writtenBytes === false
-                || !file_exists($originalProformaPath)
-                || filesize($originalProformaPath) === 0
-            ) {
-                throw new \Exception(
-                    'The generated proforma PDF could not be saved temporarily.'
-                );
-            }
+Browsershot::html($html)
+    ->setChromePath('/usr/bin/chromium')
+    ->noSandbox()
+    ->showBackground()
+    ->format('A4')
+    ->margins(12, 13, 12, 13)
+    ->savePdf($originalProformaPath);
 
             /*
          * -------------------------------------------------

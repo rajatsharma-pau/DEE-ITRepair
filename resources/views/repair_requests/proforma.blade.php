@@ -7,28 +7,31 @@
     <title>ਵਿੱਤੀ ਮਨਜ਼ੂਰੀ ਹੁਕਮ - {{ $request->request_no }}</title>
 
     <style>
-        @font-face {
-            font-family: "NotoGurmukhi";
-            font-style: normal;
-            font-weight: 400;
-            src:url("{{ public_path('fonts/NotoSansGurmukhi-Regular.ttf') }}") format("truetype");
-        }
-        @font-face {
-            font-family: "NotoGurmukhi";
-            font-style: normal;
-            font-weight: 700;
-            src:url("{{ public_path('fonts/NotoSansGurmukhi-Bold.ttf') }}") format("truetype");
-        }
-        @page { size: A4 portrait; margin: 12mm 13mm; }
-        * { box-sizing: border-box; }
-        body {
-            margin: 0; padding: 0; color: #000;
-            font-family: "NotoGurmukhi", "DejaVu Sans", sans-serif;
-            font-size: 12.2px; line-height: 1.58;
-        }
-        table, tr, td, th, div, span, strong, p {
-            font-family: "NotoGurmukhi", "DejaVu Sans", sans-serif;
-        }
+@font-face {
+    font-family: "NotoGurmukhi";
+    font-style: normal;
+    font-weight: 400;
+    src: url("file:///var/www/DEE-ITRepair/public/fonts/NotoSansGurmukhi-Regular.ttf")
+         format("truetype");
+}
+
+@font-face {
+    font-family: "NotoGurmukhi";
+    font-style: normal;
+    font-weight: 700;
+    src: url("file:///var/www/DEE-ITRepair/public/fonts/NotoSansGurmukhi-Bold.ttf")
+         format("truetype");
+}
+
+body,
+table,
+td,
+th,
+div,
+span,
+strong {
+    font-family: "NotoGurmukhi", sans-serif;
+}
         .no-print { text-align: center; margin: 10px 0 14px; }
         .no-print button { padding: 7px 14px; margin: 0 4px; border: 1px solid #444; background: #fff; }
         .page { width: 100%; margin: 0; padding: 0; }
