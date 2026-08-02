@@ -619,7 +619,11 @@
             </tr>
         </table>
     </div>
-
+   <div class="system-note">
+        ਸਿਸਟਮ ਰਿਕਾਰਡ: ਬੇਨਤੀ ਨੰ. {{ $request->request_no }}
+        @if($categoryName) | ਸ਼੍ਰੇਣੀ: {{ $categoryName }} @endif
+        | ਸਥਿਤੀ: {{ $request->status }} | ਪ੍ਰਿੰਟ ਮਿਤੀ: {{ date('d-m-Y') }}
+    </div>
 </div>
 
 </body>
