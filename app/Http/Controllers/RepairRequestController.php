@@ -789,7 +789,7 @@ class RepairRequestController extends Controller
          * STEP 1: Generate sanction proforma using Dompdf
          * -------------------------------------------------
          */
-            $html = view(
+           $html = view(
     'repair_requests.proforma',
     [
         'request' => $repair_request,
@@ -798,13 +798,14 @@ class RepairRequestController extends Controller
 )->render();
 
 Browsershot::html($html)
-    ->setChromePath('/usr/bin/chromium')
+    ->setNodeBinary('/usr/bin/node')
+    ->setNpmBinary('/usr/bin/npm')
+    ->setChromePath('/usr/bin/chromium-browser')
     ->noSandbox()
     ->showBackground()
     ->format('A4')
     ->margins(12, 13, 12, 13)
     ->savePdf($originalProformaPath);
-
             /*
          * -------------------------------------------------
          * STEP 2: Convert both PDFs into FPDI-compatible PDFs
