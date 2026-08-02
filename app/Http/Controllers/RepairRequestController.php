@@ -194,7 +194,7 @@ class RepairRequestController extends Controller
               ->orWhereNull('repair_category_id')
               ->orWhere('item_group', $category->item_group);
         })
-        ->orderBy('title_pa')
+        ->orderByRaw('COALESCE(title_pa, title)')
         ->get([
             'id',
             'title',
@@ -205,18 +205,16 @@ class RepairRequestController extends Controller
         ->map(function ($item) {
             return [
                 'id' => $item->id,
-
-                // Punjabi first, English fallback
                 'title' => $item->title_pa ?: $item->title,
-
-                'description' =>
-                    $item->description_pa ?: $item->description,
+                'description' => $item->description_pa
+                    ?: $item->description
+                    ?: $item->title_pa
+                    ?: $item->title,
             ];
         });
 
     return response()->json($items);
 }
-
     public function store(Request $request)
     {
         $user = Auth::user();
