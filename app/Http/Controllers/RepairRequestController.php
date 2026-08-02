@@ -186,7 +186,7 @@ class RepairRequestController extends Controller
         return view('repair_requests.create', compact('categories', 'assets', 'employees', 'employee', 'problemTemplates'));
     }
 
-   public function problemTemplatesByCategory(RepairCategory $category)
+  public function problemTemplatesByCategory(RepairCategory $category)
 {
     $items = ProblemTemplate::where('is_active', 1)
         ->where(function ($q) use ($category) {
@@ -194,26 +194,34 @@ class RepairRequestController extends Controller
               ->orWhereNull('repair_category_id')
               ->orWhere('item_group', $category->item_group);
         })
-        ->orderByRaw('COALESCE(title_pa, title)')
+        ->orderByRaw("COALESCE(NULLIF(title_pa, ''), title)")
         ->get([
             'id',
             'title',
             'title_pa',
             'description',
             'description_pa',
-        ])
-        ->map(function ($item) {
-            return [
-                'id' => $item->id,
-                'title' => $item->title_pa ?: $item->title,
-                'description' => $item->description_pa
-                    ?: $item->description
-                    ?: $item->title_pa
-                    ?: $item->title,
-            ];
-        });
+        ]);
 
-    return response()->json($items);
+    $result = $items->map(function ($item) {
+        return [
+            'id' => $item->id,
+
+            'title' => !empty($item->title_pa)
+                ? $item->title_pa
+                : $item->title,
+
+            'description' => !empty($item->description_pa)
+                ? $item->description_pa
+                : (!empty($item->description)
+                    ? $item->description
+                    : (!empty($item->title_pa)
+                        ? $item->title_pa
+                        : $item->title)),
+        ];
+    });
+
+    return response()->json($result);
 }
     public function store(Request $request)
     {

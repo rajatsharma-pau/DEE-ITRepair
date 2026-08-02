@@ -464,15 +464,8 @@
             );
 
             items.forEach(function (item) {
-                var title =
-                    item.title_pa ||
-                    item.title ||
-                    'ਬਿਨਾਂ ਸਿਰਲੇਖ';
-
-                var description =
-                    item.description_pa ||
-                    item.description ||
-                    title;
+                var title = item.title || 'ਬਿਨਾਂ ਸਿਰਲੇਖ';
+var description = item.description || title;
 
                 $problem.append(
                     $('<option>', {
