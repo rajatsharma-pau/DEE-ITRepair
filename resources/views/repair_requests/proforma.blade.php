@@ -11,13 +11,13 @@
             font-family: "NotoGurmukhi";
             font-style: normal;
             font-weight: 400;
-            src: url("file://{{ public_path('fonts/NotoSansGurmukhi-Regular.ttf') }}");
+            src:url("{{ public_path('fonts/NotoSansGurmukhi-Regular.ttf') }}") format("truetype");
         }
         @font-face {
             font-family: "NotoGurmukhi";
             font-style: normal;
             font-weight: 700;
-            src: url("file://{{ public_path('fonts/NotoSansGurmukhi-Bold.ttf') }}");
+            src:url("{{ public_path('fonts/NotoSansGurmukhi-Bold.ttf') }}") format("truetype");
         }
         @page { size: A4 portrait; margin: 12mm 13mm; }
         * { box-sizing: border-box; }
