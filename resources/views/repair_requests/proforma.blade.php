@@ -58,10 +58,6 @@
             margin: 0 4px;
         }
 
-        .center {
-            text-align: center;
-        }
-
         .right {
             text-align: right;
         }
@@ -215,10 +211,6 @@
             height: 21px;
         }
 
-        .system-note {
-            display: none;
-        }
-
         @media print {
             .no-print {
                 display: none;
@@ -237,6 +229,156 @@
 @endif
 
 @php
+    if (!function_exists('punjabiNumberWords')) {
+        function punjabiNumberWords($number, $addRupees = true)
+        {
+            $number = (int) round($number);
+
+            if ($number === 0) {
+                return $addRupees ? 'ਸਿਫ਼ਰ ਰੁਪਏ ਮਾਤਰ' : 'ਸਿਫ਼ਰ';
+            }
+
+            $words = [
+                0 => '',
+                1 => 'ਇੱਕ',
+                2 => 'ਦੋ',
+                3 => 'ਤਿੰਨ',
+                4 => 'ਚਾਰ',
+                5 => 'ਪੰਜ',
+                6 => 'ਛੇ',
+                7 => 'ਸੱਤ',
+                8 => 'ਅੱਠ',
+                9 => 'ਨੌਂ',
+                10 => 'ਦਸ',
+                11 => 'ਗਿਆਰਾਂ',
+                12 => 'ਬਾਰਾਂ',
+                13 => 'ਤੇਰਾਂ',
+                14 => 'ਚੌਦਾਂ',
+                15 => 'ਪੰਦਰਾਂ',
+                16 => 'ਸੋਲਾਂ',
+                17 => 'ਸਤਾਰਾਂ',
+                18 => 'ਅਠਾਰਾਂ',
+                19 => 'ਉੱਨੀ',
+                20 => 'ਵੀਹ',
+                21 => 'ਇੱਕੀ',
+                22 => 'ਬਾਈ',
+                23 => 'ਤੇਈ',
+                24 => 'ਚੌਵੀ',
+                25 => 'ਪੱਚੀ',
+                26 => 'ਛੱਬੀ',
+                27 => 'ਸਤਾਈ',
+                28 => 'ਅਠਾਈ',
+                29 => 'ਉਨੱਤੀ',
+                30 => 'ਤੀਹ',
+                31 => 'ਇਕੱਤੀ',
+                32 => 'ਬੱਤੀ',
+                33 => 'ਤੇਤੀ',
+                34 => 'ਚੌਂਤੀ',
+                35 => 'ਪੈਂਤੀ',
+                36 => 'ਛੱਤੀ',
+                37 => 'ਸੈਂਤੀ',
+                38 => 'ਅਠੱਤੀ',
+                39 => 'ਉਨਤਾਲੀ',
+                40 => 'ਚਾਲੀ',
+                41 => 'ਇਕਤਾਲੀ',
+                42 => 'ਬਿਆਲੀ',
+                43 => 'ਤੇਤਾਲੀ',
+                44 => 'ਚੁਤਾਲੀ',
+                45 => 'ਪੰਤਾਲੀ',
+                46 => 'ਛਿਆਲੀ',
+                47 => 'ਸੰਤਾਲੀ',
+                48 => 'ਅਠਤਾਲੀ',
+                49 => 'ਉਨੰਜਾ',
+                50 => 'ਪੰਜਾਹ',
+                51 => 'ਇਕਵੰਜਾ',
+                52 => 'ਬਵੰਜਾ',
+                53 => 'ਤਰਵੰਜਾ',
+                54 => 'ਚੁਰੰਜਾ',
+                55 => 'ਪਚਵੰਜਾ',
+                56 => 'ਛਪੰਜਾ',
+                57 => 'ਸਤਵੰਜਾ',
+                58 => 'ਅਠਵੰਜਾ',
+                59 => 'ਉਨਾਹਠ',
+                60 => 'ਸੱਠ',
+                61 => 'ਇਕਾਹਠ',
+                62 => 'ਬਾਹਠ',
+                63 => 'ਤਰੇਹਠ',
+                64 => 'ਚੌਂਹਠ',
+                65 => 'ਪੈਂਹਠ',
+                66 => 'ਛਿਆਹਠ',
+                67 => 'ਸਤਾਹਠ',
+                68 => 'ਅਠਾਹਠ',
+                69 => 'ਉਨੱਤਰ',
+                70 => 'ਸੱਤਰ',
+                71 => 'ਇਕਹੱਤਰ',
+                72 => 'ਬਹੱਤਰ',
+                73 => 'ਤਿਹੱਤਰ',
+                74 => 'ਚੁਹੱਤਰ',
+                75 => 'ਪਝੱਤਰ',
+                76 => 'ਛਿਹੱਤਰ',
+                77 => 'ਸਤੱਤਰ',
+                78 => 'ਅਠੱਤਰ',
+                79 => 'ਉਨਾਸੀ',
+                80 => 'ਅੱਸੀ',
+                81 => 'ਇਕਿਆਸੀ',
+                82 => 'ਬਿਆਸੀ',
+                83 => 'ਤਰਿਆਸੀ',
+                84 => 'ਚੌਰਾਸੀ',
+                85 => 'ਪਚਾਸੀ',
+                86 => 'ਛਿਆਸੀ',
+                87 => 'ਸਤਾਸੀ',
+                88 => 'ਅਠਾਸੀ',
+                89 => 'ਨਵਾਸੀ',
+                90 => 'ਨੱਬੇ',
+                91 => 'ਇਕਾਨਵੇਂ',
+                92 => 'ਬਾਨਵੇਂ',
+                93 => 'ਤਰਾਨਵੇਂ',
+                94 => 'ਚੁਰਾਨਵੇਂ',
+                95 => 'ਪਚਾਨਵੇਂ',
+                96 => 'ਛਿਆਨਵੇਂ',
+                97 => 'ਸਤਾਨਵੇਂ',
+                98 => 'ਅਠਾਨਵੇਂ',
+                99 => 'ਨੜਿਨਵੇਂ',
+            ];
+
+            $parts = [];
+
+            if ($number >= 10000000) {
+                $crore = intdiv($number, 10000000);
+                $parts[] = punjabiNumberWords($crore, false).' ਕਰੋੜ';
+                $number %= 10000000;
+            }
+
+            if ($number >= 100000) {
+                $lakh = intdiv($number, 100000);
+                $parts[] = punjabiNumberWords($lakh, false).' ਲੱਖ';
+                $number %= 100000;
+            }
+
+            if ($number >= 1000) {
+                $thousand = intdiv($number, 1000);
+                $parts[] = punjabiNumberWords($thousand, false).' ਹਜ਼ਾਰ';
+                $number %= 1000;
+            }
+
+            if ($number >= 100) {
+                $hundred = intdiv($number, 100);
+                $parts[] = $words[$hundred].' ਸੌ';
+                $number %= 100;
+            }
+
+            if ($number > 0) {
+                $parts[] = $words[$number];
+            }
+
+            $result = trim(implode(' ', $parts));
+
+            return $addRupees
+                ? $result.' ਰੁਪਏ ਮਾਤਰ'
+                : $result;
+        }
+    }
+
     $amount = $request->proforma_amount
         ?: optional($request->selectedEstimate)->estimate_amount
         ?: $request->financial_sanction_amount
@@ -246,11 +388,12 @@
         ? number_format((float) $amount, 2)
         : '';
 
+    $amountInWords = $request->amount_in_words
+        ?: punjabiNumberWords($amount);
+
     $employeeName = optional($request->employee)->display_name ?: '';
 
-    $departmentName = optional($request->department)->name
-        ?: optional(optional($request->employee)->department)->name
-        ?: '';
+    $departmentName = 'ਨਿਰਦੇਸ਼ਕ ਪਸਾਰ ਸਿੱਖਿਆ';
 
     $categoryName = optional($request->category)->name;
     $itemType = trim((string) ($request->item_type ?: ''));
@@ -292,8 +435,27 @@
     )->format('d-m-Y');
 
     $delegationSerialNumber = $request->delegation_serial_number ?: '';
-    $amountInWords = $request->amount_in_words ?: '';
-    $workType = $request->work_type ?: '';
+
+    $workTypeEnglish = $request->work_type
+        ?: $request->purchase_payment_type
+        ?: '';
+
+    $workTypeMap = [
+        'purchase' => 'ਖਰੀਦ',
+        'repair' => 'ਮੁਰੰਮਤ',
+        'service' => 'ਸੇਵਾ',
+        'material' => 'ਸਮੱਗਰੀ ਦੀ ਖਰੀਦ',
+        'purchase / payment of material / repair'
+            => 'ਸਮੱਗਰੀ ਦੀ ਖਰੀਦ/ਭੁਗਤਾਨ/ਮੁਰੰਮਤ',
+        'repair / purchase / payment of material'
+            => 'ਮੁਰੰਮਤ/ਖਰੀਦ/ਸਮੱਗਰੀ ਦਾ ਭੁਗਤਾਨ',
+    ];
+
+    $workTypeKey = strtolower(trim($workTypeEnglish));
+
+    $workType = isset($workTypeMap[$workTypeKey])
+        ? $workTypeMap[$workTypeKey]
+        : ($workTypeEnglish ?: 'ਮੁਰੰਮਤ/ਖਰੀਦ/ਸੇਵਾ');
 
     $endorsementNumber = $request->endorsement_number ?: '';
     $endorsementDate = optional($request->endorsement_date)->format('d-m-Y');
@@ -310,7 +472,8 @@
     </div>
 
     <div class="department-title">
-        ਵਿਭਾਗ: <span class="underline u-lg">{{ $departmentName }}</span>
+        ਵਿਭਾਗ:
+        <span class="underline u-lg">{{ $departmentName }}</span>
     </div>
 
     <table class="meta-table">
