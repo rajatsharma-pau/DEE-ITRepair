@@ -71,6 +71,115 @@
         && !$canStorekeeperEstimate
         && !$canVerifyAndReturn
         && !$canSubmitD4;
+@extends('layouts.app')
+
+@section('content')
+@php
+    $user = Auth::user();
+    $loggedUser = $user;
+    $userEmployee = $user ? $user->employee : null;
+
+    $hasAnyRole = function ($roles) use ($user) {
+        if (!$user) { return false; }
+
+        $roles = is_array($roles) ? $roles : [$roles];
+
+        if (method_exists($user, 'hasAnyRole') && $user->hasAnyRole($roles)) {
+            return true;
+        }
+
+        foreach ($roles as $role) {
+            if (method_exists($user, 'hasRole') && $user->hasRole($role)) { return true; }
+            if (method_exists($user, 'isRole') && $user->isRole($role)) { return true; }
+        }
+
+        return false;
+    };
+
+    $isSuperuser = $hasAnyRole(['superuser']);
+    $isStoreInchargeUser = $userEmployee && method_exists($userEmployee, 'hasActiveCharge') && $userEmployee->hasActiveCharge('Store Incharge');
+
+    /*
+     * Role-specific workflow panels.
+     * Storekeeper should see only storekeeper work.
+     * Programmer / Store Incharge should see only verification and return to storekeeper.
+     * D-4 should see only D-4 manual file record.
+     */
+    $workflowAccessClass = '\\App\\Support\\RepairRequestWorkflowAccess';
+
+    if (class_exists($workflowAccessClass)) {
+        $canStorekeeperEstimate = method_exists($workflowAccessClass, 'canShowStorekeeperEstimatePanel')
+            ? $workflowAccessClass::canShowStorekeeperEstimatePanel($request, $loggedUser)
+            : false;
+
+        $canVerifyAndReturn = method_exists($workflowAccessClass, 'canShowVerificationPanel')
+            ? $workflowAccessClass::canShowVerificationPanel($request, $loggedUser)
+            : false;
+
+        $canSubmitD4 = method_exists($workflowAccessClass, 'canShowD4SubmitPanel')
+            ? $workflowAccessClass::canShowD4SubmitPanel($request, $loggedUser)
+            : false;
+
+        $verifierLabel = method_exists($workflowAccessClass, 'verifierLabel')
+            ? $workflowAccessClass::verifierLabel($request)
+            : 'Programmer / Store Incharge';
+    } else {
+        /* Fallback if support class is not copied yet. */
+        $canStorekeeperEstimate = $isSuperuser || $hasAnyRole(['storekeeper']);
+        $canVerifyAndReturn = $isSuperuser || $hasAnyRole(['programmer','store_incharge']) || $isStoreInchargeUser;
+        $canSubmitD4 = $isSuperuser || $hasAnyRole(['d4_seat']);
+        $verifierLabel = 'Programmer / Store Incharge';
+    }
+
+    /* Keep old variable names safe for any included snippets. */
+    $canStorekeeperAction = $canStorekeeperEstimate;
+    $canProgrammerAction = $canVerifyAndReturn;
+
+    /*
+     * D-4 must be able to work after the physical file reaches D-4.
+     * Do not rely only on the optional workflow support class.
+     */
+    $isD4User = $isSuperuser || $hasAnyRole(['d4_seat']);
+
+    $isD4WorkflowFile =
+        $request->current_handler_role === 'd4_seat'
+        || in_array($request->manual_sanction_status, [
+            'Submitted to D-4',
+            'Received at D-4',
+            'Put Up for Sanction',
+        ], true)
+        || in_array($request->status, [
+            'Submitted Manually to D-4',
+            'D-4 Received Manual File',
+            'D-4 Put Up for Sanction',
+        ], true);
+
+    $canD4Action = $isD4User && $isD4WorkflowFile;
+
+    $canD4MarkReceived =
+        $canD4Action
+        && (
+            $request->manual_sanction_status === 'Submitted to D-4'
+            || $request->status === 'Submitted Manually to D-4'
+        );
+
+    $canD4PutUp =
+        $canD4Action
+        && (
+            $request->manual_sanction_status === 'Received at D-4'
+            || $request->manual_sanction_status === 'Put Up for Sanction'
+            || $request->status === 'D-4 Received Manual File'
+            || $request->status === 'D-4 Put Up for Sanction'
+        );
+
+    /*
+     * Manual correction should not appear when a role-specific workflow action is pending.
+     * This keeps Programmer / Store Incharge screens clean.
+     */
+    $canManualUpdate = ($isSuperuser || $hasAnyRole(['admin','director']))
+        && !$canStorekeeperEstimate
+        && !$canVerifyAndReturn
+        && !$canSubmitD4;
 
     $canFeedback = (
             ($userEmployee && $request->employee_id == $userEmployee->id)
@@ -437,27 +546,80 @@
 
         @if($canD4Action)
         <div class="card mb-3 rr-action-card">
-            <div class="card-header bg-light" data-toggle="collapse" data-target="#d4ActionBox" aria-expanded="true">
+            <div class="card-header bg-light"
+                 data-toggle="collapse"
+                 data-target="#d4ActionBox"
+                 aria-expanded="true">
                 <strong>D-4 Seat Manual File Record</strong>
+                <small class="text-muted ml-2">
+                    Physical receipt → Print taken → Put up for sanction
+                </small>
             </div>
+
             <div id="d4ActionBox" class="collapse show">
                 <div class="card-body">
-                    <form method="POST" action="{{ route('repair-requests.d4-action', $request) }}">
+
+                    <div class="alert alert-info py-2">
+                        <strong>D-4 workflow:</strong>
+                        First mark the physical file as received. After taking the print,
+                        record that the case has been put up before the competent authority
+                        for financial sanction.
+                    </div>
+
+                    <form id="d4ActionForm"
+                          method="POST"
+                          action="{{ route('repair-requests.d4-action', $request) }}">
+
                         @csrf
+
                         <div class="row">
                             <div class="col-md-4 form-group">
-                                <label class="rr-required">Action</label>
-                                <select name="action" class="form-control" required>
-                                    <option value="mark_received">Mark Manual File Received</option>
-                                    <option value="add_note">Add Note Only</option>
+                                <label class="rr-required">D-4 Action</label>
+
+                                <select id="d4Action"
+                                        name="action"
+                                        class="form-control"
+                                        required>
+
+                                    <option value="">Select Action</option>
+
+                                    @if($canD4MarkReceived)
+                                        <option value="mark_received">
+                                            Mark Physical File Received
+                                        </option>
+                                    @endif
+
+                                    @if($canD4PutUp)
+                                        <option value="sanction_put_up">
+                                            Print Taken & Put Up for Sanction
+                                        </option>
+                                    @endif
+
+                                    <option value="add_note">
+                                        Add D-4 Note Only
+                                    </option>
                                 </select>
+
+                                <small class="rr-small-help">
+                                    The put-up action becomes available after the physical
+                                    file is marked as received.
+                                </small>
                             </div>
+
                             <div class="col-md-8 form-group">
                                 <label class="rr-required">D-4 Remarks</label>
-                                <input name="d4_remarks" value="{{ old('d4_remarks', $request->d4_remarks) }}" class="form-control" required>
+
+                                <textarea name="d4_remarks"
+                                          class="form-control"
+                                          rows="3"
+                                          required
+                                          placeholder="Example: Print of financial sanction proforma and estimate taken. Case put up before the competent authority for sanction.">{{ old('d4_remarks', $request->d4_remarks) }}</textarea>
                             </div>
                         </div>
-                        <button type="submit" class="btn btn-dark">Submit D-4 Action</button>
+
+                        <button type="submit" class="btn btn-dark">
+                            Submit D-4 Action
+                        </button>
                     </form>
                 </div>
             </div>
@@ -542,6 +704,93 @@
     </div>
 </div>
 @endsection
+
+@push('scripts')
+<script>
+(function(){
+    function setRequiredLabel(labelSelector, isRequired) {
+        var label = $(labelSelector);
+        if (isRequired) { label.addClass('rr-required'); }
+        else { label.removeClass('rr-required'); }
+    }
+
+    function updateStorekeeperMandatoryFields() {
+        if (!$('#storeAction').length) { return; }
+
+        var action = $('#storeAction').val();
+        var selectedEstimate = $('#selectedEstimate').val();
+
+        var isForwardAction = ['forward_to_programmer', 'forward_to_store_incharge'].indexOf(action) >= 0;
+        var newEstimateRequired = isForwardAction && !selectedEstimate;
+
+        $('#vendorId').prop('required', newEstimateRequired);
+        $('#estimateAmount').prop('required', newEstimateRequired);
+        $('#estimateFile').prop('required', newEstimateRequired);
+
+        setRequiredLabel('#vendorLabel', newEstimateRequired);
+        setRequiredLabel('#amountLabel', newEstimateRequired);
+        setRequiredLabel('#pdfLabel', newEstimateRequired);
+
+        $('#assignedProgrammer').closest('.form-group').toggle(action === 'forward_to_programmer');
+        $('#assignedStoreIncharge').closest('.form-group').toggle(action === 'forward_to_store_incharge');
+
+        var showEstimateFields = isForwardAction || action === 'reject';
+        $('#vendorId').closest('.form-group').toggle(isForwardAction);
+        $('#estimateAmount').closest('.form-group').toggle(isForwardAction);
+        $('#estimateFile').closest('.form-group').toggle(isForwardAction);
+        $('textarea[name="estimate_details"]').closest('.form-group').toggle(isForwardAction);
+        $('input[name="estimate_date"]').closest('.form-group').toggle(isForwardAction);
+    }
+
+    $('#storeAction, #selectedEstimate').on('change', updateStorekeeperMandatoryFields);
+    updateStorekeeperMandatoryFields();
+
+    $('#storekeeperActionForm').on('submit', function(e){
+        var action = $('#storeAction').val();
+
+        if (['forward_to_programmer', 'forward_to_store_incharge'].indexOf(action) >= 0) {
+            var label = action === 'forward_to_programmer' ? 'Programmer' : 'Store Incharge';
+            if (!confirm('Confirm: vendor estimate will be saved and sent to ' + label + ' for verification. Continue?')) {
+                e.preventDefault();
+                return false;
+            }
+        }
+
+        if (action === 'mark_submitted_d4') {
+            if (!confirm('Confirm: printed financial sanction file is submitted manually to D-4?')) {
+                e.preventDefault();
+                return false;
+            }
+        }
+    });
+
+    $('#verificationReturnForm').on('submit', function(e){
+        if (!confirm('Confirm: submit verification result and return request to Storekeeper?')) {
+            e.preventDefault();
+            return false;
+        }
+    });
+
+    $('#d4ActionForm').on('submit', function(e){
+        var action = $('#d4Action').val();
+
+        if (action === 'mark_received') {
+            if (!confirm('Confirm that the physical financial sanction file has been received at D-4?')) {
+                e.preventDefault();
+                return false;
+            }
+        }
+
+        if (action === 'sanction_put_up') {
+            if (!confirm('Confirm that the print has been taken and the case has been put up for financial sanction?')) {
+                e.preventDefault();
+                return false;
+            }
+        }
+    });
+})();
+</script>
+@endpush
 
 @push('scripts')
 <script>
