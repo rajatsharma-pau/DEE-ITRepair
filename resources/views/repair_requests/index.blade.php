@@ -330,6 +330,7 @@
                             </small>
                         @else
                             <select name="college_id"
+                                    id="college_id"
                                     class="form-control">
 
                                 <option value="">
@@ -380,20 +381,38 @@
                             </small>
                         @else
                             <select name="department_id"
-                                    class="form-control">
+                                    id="department_id"
+                                    class="form-control"
+                                    data-selected-department="{{ $selectedDepartmentId }}">
 
                                 <option value="">
-                                    All Departments
+                                    {{ $selectedCollegeId ? 'All Departments' : 'Select College / Directorate First' }}
                                 </option>
 
                                 @foreach($departments ?? [] as $d)
-                                    <option value="{{ $d->id }}"
-                                        {{ (string) $selectedDepartmentId === (string) $d->id ? 'selected' : '' }}>
+                                    @php
+                                        /*
+                                         * Supports the common department foreign-key names.
+                                         * In your project this will normally be college_id.
+                                         */
+                                        $departmentCollegeId = isset($d->college_id)
+                                            ? $d->college_id
+                                            : (isset($d->college_directorate_id)
+                                                ? $d->college_directorate_id
+                                                : (isset($d->parent_id) ? $d->parent_id : null));
+                                    @endphp
 
+                                    <option value="{{ $d->id }}"
+                                            data-college-id="{{ $departmentCollegeId }}"
+                                            {{ (string) $selectedDepartmentId === (string) $d->id ? 'selected' : '' }}>
                                         {{ $d->name }}
                                     </option>
                                 @endforeach
                             </select>
+
+                            <small class="rr-search-help">
+                                Select a College / Directorate to view its departments.
+                            </small>
                         @endif
                     </div>
 
@@ -585,4 +604,81 @@
         {{ $requests->appends(request()->query())->links() }}
     </div>
 </div>
+@push('scripts')
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        var collegeSelect = document.getElementById('college_id');
+        var departmentSelect = document.getElementById('department_id');
+
+        if (!collegeSelect || !departmentSelect) {
+            return;
+        }
+
+        var originalOptions = Array.prototype.slice.call(
+            departmentSelect.querySelectorAll('option[data-college-id]')
+        ).map(function (option) {
+            return option.cloneNode(true);
+        });
+
+        var initiallySelectedDepartment = String(
+            departmentSelect.getAttribute('data-selected-department') || ''
+        );
+
+        function loadDepartments(keepSelectedDepartment) {
+            var selectedCollegeId = String(collegeSelect.value || '');
+            var selectedDepartmentId = keepSelectedDepartment
+                ? initiallySelectedDepartment
+                : '';
+
+            departmentSelect.innerHTML = '';
+
+            var placeholder = document.createElement('option');
+            placeholder.value = '';
+            placeholder.textContent = selectedCollegeId
+                ? 'All Departments'
+                : 'Select College / Directorate First';
+            departmentSelect.appendChild(placeholder);
+
+            if (!selectedCollegeId) {
+                departmentSelect.value = '';
+                departmentSelect.disabled = true;
+                return;
+            }
+
+            departmentSelect.disabled = false;
+
+            originalOptions.forEach(function (originalOption) {
+                if (
+                    String(originalOption.getAttribute('data-college-id'))
+                    === selectedCollegeId
+                ) {
+                    var option = originalOption.cloneNode(true);
+                    option.selected = (
+                        selectedDepartmentId !== ''
+                        && String(option.value) === selectedDepartmentId
+                    );
+                    departmentSelect.appendChild(option);
+                }
+            });
+
+            if (
+                selectedDepartmentId !== ''
+                && !departmentSelect.querySelector(
+                    'option[value="' + selectedDepartmentId.replace(/"/g, '\"') + '"]'
+                )
+            ) {
+                departmentSelect.value = '';
+            }
+        }
+
+        collegeSelect.addEventListener('change', function () {
+            initiallySelectedDepartment = '';
+            loadDepartments(false);
+        });
+
+        loadDepartments(true);
+    });
+</script>
+@endpush
+
 @endsection
