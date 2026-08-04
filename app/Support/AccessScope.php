@@ -274,7 +274,16 @@ public static function normalizeRole($role)
             return true;
         }
 
-        if (self::userHasAnyRole($user, ['admin', 'college_admin', 'director', 'department_admin', 'storekeeper'])) {
+        if (self::userHasAnyRole($user, [
+            'admin',
+            'college_admin',
+            'director',
+            'department_admin',
+            'storekeeper',
+            'programmer',
+            'store_incharge',
+            'd4_seat',
+        ])) {
             return (int) self::collegeId($user) === (int) $collegeId;
         }
 
@@ -309,8 +318,25 @@ public static function normalizeRole($role)
             return (int) self::departmentId($user) === (int) $departmentId;
         }
 
-        if (self::userHasAnyRole($user, ['admin', 'college_admin', 'director', 'storekeeper'])) {
+        if (self::userHasAnyRole($user, [
+            'admin',
+            'college_admin',
+            'director',
+            'storekeeper',
+        ])) {
             return (int) self::collegeId($user) === (int) $department->college_id;
+        }
+
+        /*
+         * Functional roles work only within their assigned department.
+         * This includes Programmer, Store Incharge and D-4 Seat.
+         */
+        if (self::userHasAnyRole($user, [
+            'programmer',
+            'store_incharge',
+            'd4_seat',
+        ])) {
+            return (int) self::departmentId($user) === (int) $departmentId;
         }
 
         return false;

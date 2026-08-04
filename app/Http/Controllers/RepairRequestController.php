@@ -1297,124 +1297,83 @@ Browsershot::html($html)
     }
 
     private function authorizeView(RepairRequest $request)
-    {
-        $user = Auth::user();
-        $employee = $user ? $user->employee : null;
+{
+    $user = Auth::user();
+    $employee = $user ? $user->employee : null;
 
-        if (!$user) {
-            abort(403);
-        }
-
-        if ($user->hasRole('superuser')) {
-            return true;
-        }
-
-        if ($user->hasRole('d4_seat')) {
-            $isAssignedToD4Employee =
-                $employee
-                && (int) $request->assigned_to_employee_id === (int) $employee->id;
-
-            $isD4Handler =
-                $request->current_handler_role === 'd4_seat';
-
-            $isD4ManualStatus = in_array(
-                $request->manual_sanction_status,
-                [
-                    'Submitted to D-4',
-                    'Received at D-4',
-                    'Sanction Received',
-                    'Rejected',
-                ],
-                true
-            );
-
-            $isD4RequestStatus = in_array(
-                $request->status,
-                [
-                    'Submitted Manually to D-4',
-                    'D-4 Received Manual File',
-                    'Sanction Received',
-                    'Sanction Rejected',
-                ],
-                true
-            );
-
-            if (
-                $isAssignedToD4Employee
-                || $isD4Handler
-                || $isD4ManualStatus
-                || $isD4RequestStatus
-            ) {
-                return true;
-            }
-
-            abort(
-                403,
-                'This repair request is not currently available to the D-4 Seat.'
-            );
-        }
-
-        if (
-            $employee
-            && (int) $request->employee_id === (int) $employee->id
-        ) {
-            return true;
-        }
-
-        if (
-            $employee
-            && (int) $request->assigned_to_employee_id === (int) $employee->id
-        ) {
-            return true;
-        }
-
-        if ($this->employeeHasCharge($employee, 'Store Incharge')) {
-            if (
-                !$request->department_id
-                || AccessScope::canAccessDepartment(
-                    $request->department_id,
-                    $user
-                )
-            ) {
-                return true;
-            }
-        }
-
-        if (
-            $user->hasRole('storekeeper')
-            || $user->hasRole('programmer')
-            || $user->hasRole('store_incharge')
-        ) {
-            if (
-                AccessScope::canAccessDepartment(
-                    $request->department_id,
-                    $user
-                )
-            ) {
-                return true;
-            }
-
-            abort(403);
-        }
-
-        if (
-            $user->hasRole('admin')
-            || $user->hasRole('college_admin')
-            || $user->hasRole('department_admin')
-            || $user->hasRole('director')
-        ) {
-            if (
-                AccessScope::canAccessDepartment(
-                    $request->department_id,
-                    $user
-                )
-            ) {
-                return true;
-            }
-        }
-
+    if (!$user) {
         abort(403);
     }
+
+    if ($this->userHasRole($user, 'superuser')) {
+        return true;
+    }
+
+    if ($this->userHasRole($user, 'd4_seat')) {
+        $allowed =
+            $request->current_handler_role === 'd4_seat'
+            || in_array($request->manual_sanction_status, [
+                'Submitted to D-4',
+                'Received at D-4',
+                'Sanction Received',
+                'Rejected',
+            ], true)
+            || in_array($request->status, [
+                'Submitted Manually to D-4',
+                'D-4 Received Manual File',
+                'Sanction Received',
+                'Sanction Rejected',
+            ], true)
+            || (
+                $employee &&
+                (int) $request->assigned_to_employee_id ===
+                (int) $employee->id
+            );
+
+        if ($allowed) {
+            return true;
+        }
+
+        abort(403, 'The request has not reached the D-4 workflow.');
+    }
+
+    if (
+        $employee &&
+        (
+            (int) $request->employee_id === (int) $employee->id
+            ||
+            (int) $request->assigned_to_employee_id ===
+            (int) $employee->id
+        )
+    ) {
+        return true;
+    }
+
+    if ($this->employeeHasCharge($employee, 'Store Incharge')) {
+        return true;
+    }
+
+    if (
+        $this->userHasRole($user, 'storekeeper')
+        || $this->userHasRole($user, 'programmer')
+        || $this->userHasRole($user, 'store_incharge')
+        || $this->userHasRole($user, 'admin')
+        || $this->userHasRole($user, 'college_admin')
+        || $this->userHasRole($user, 'department_admin')
+        || $this->userHasRole($user, 'director')
+    ) {
+        if (
+            AccessScope::canAccessDepartment(
+                $request->department_id,
+                $user
+            )
+        ) {
+            return true;
+        }
+    }
+
+    abort(403);
+}
 
     private function log(RepairRequest $request, $action, $old, $new, $remarks = null)
     {
