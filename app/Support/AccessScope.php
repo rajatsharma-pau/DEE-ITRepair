@@ -224,8 +224,109 @@ public static function normalizeRole($role)
 
         return \DB::table('departments')->where('id', $departmentId)->first();
     }
+public static function apply(
+    $query,
+    $collegeColumn = 'college_id',
+    $departmentColumn = 'department_id',
+    $user = null
+) {
+    $user = self::currentUser($user);
 
-    public static function apply($query, $collegeColumn = 'college_id', $departmentColumn = 'department_id', $user = null)
+    if (!$user) {
+        return $query->whereRaw('1 = 0');
+    }
+
+    /*
+     * Superuser can see all records.
+     */
+    if (self::isSuperuser($user)) {
+        return $query;
+    }
+
+    /*
+     * Department Admin:
+     * only records belonging to the assigned department.
+     */
+    if (self::userHasRole($user, 'department_admin')) {
+        $departmentId = self::departmentId($user);
+
+        return $departmentId
+            ? $query->where($departmentColumn, $departmentId)
+            : $query->whereRaw('1 = 0');
+    }
+
+    /*
+     * Admin / College Admin / Director:
+     * all records belonging to the assigned College/Directorate.
+     */
+    if (self::userHasAnyRole($user, [
+        'admin',
+        'college_admin',
+        'director',
+    ])) {
+        $collegeId = self::collegeId($user);
+
+        return $collegeId
+            ? $query->where($collegeColumn, $collegeId)
+            : $query->whereRaw('1 = 0');
+    }
+
+    /*
+     * Storekeeper:
+     * all repair/store records of the assigned College/Directorate.
+     *
+     * A Storekeeper who is also an employee must not be limited
+     * to only their own employee record.
+     */
+    if (self::userHasRole($user, 'storekeeper')) {
+        $collegeId = self::collegeId($user);
+
+        return $collegeId
+            ? $query->where($collegeColumn, $collegeId)
+            : $query->whereRaw('1 = 0');
+    }
+
+    /*
+     * Programmer / Store Incharge / D-4:
+     * records belonging to their assigned department.
+     */
+    if (self::userHasAnyRole($user, [
+        'programmer',
+        'store_incharge',
+        'd4_seat',
+    ])) {
+        $departmentId = self::departmentId($user);
+
+        return $departmentId
+            ? $query->where($departmentColumn, $departmentId)
+            : $query->whereRaw('1 = 0');
+    }
+
+    /*
+     * Ordinary employee:
+     * only their own record.
+     *
+     * This condition is mainly for employee master queries.
+     * RepairRequestController additionally filters using employee_id.
+     */
+    if (self::isEmployeeOnly($user)) {
+        if (
+            isset($user->employee)
+            && $user->employee
+            && isset($user->employee->id)
+        ) {
+            return $query->where(
+                'id',
+                $user->employee->id
+            );
+        }
+
+        return $query->whereRaw('1 = 0');
+    }
+
+    return $query->whereRaw('1 = 0');
+}
+    public static function apply1($query, $collegeColumn = 'college_id', $departmentColumn = 'department_id', $user = null)
     {
         $user = self::currentUser($user);
 
