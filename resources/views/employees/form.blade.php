@@ -1,6 +1,16 @@
 @php
     $authUser = Auth::user();
-    $isEditMode = isset($employee) && $employee && $employee->exists;
+
+    /*
+     * The create page may include this form without passing an $employee
+     * variable. Use a blank Employee model so all shared create/edit fields
+     * can be accessed safely.
+     */
+    if (!isset($employee) || !$employee) {
+        $employee = new \App\Employee();
+    }
+
+    $isEditMode = (bool) $employee->exists;
 
     $safeDate = function ($value) {
         if (empty($value)) {
