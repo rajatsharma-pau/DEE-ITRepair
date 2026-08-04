@@ -614,35 +614,8 @@ class RepairRequestController extends Controller
     public function d4Action(Request $request, RepairRequest $repair_request)
     {
         $user = Auth::user();
-
-        if (
-            !$user
-            || (
-                !$user->hasRole('superuser')
-                && !$user->hasRole('d4_seat')
-                && !$user->hasRole('admin')
-                && !$user->hasRole('college_admin')
-                && !$user->hasRole('department_admin')
-                && !$user->hasRole('director')
-            )
-        ) {
-            abort(403);
-        }
-
-        /*
-         * D-4 Seat and Superuser are allowed to process files in the D-4 queue
-         * without being blocked by the normal department scope check.
-         */
-        if (
-            !$user->hasRole('superuser')
-            && !$user->hasRole('d4_seat')
-            && !AccessScope::canAccessDepartment(
-                $repair_request->department_id,
-                $user
-            )
-        ) {
-            abort(403);
-        }
+        if (!$user->isRole(['admin', 'college_admin', 'department_admin', 'director', 'd4_seat'])) abort(403);
+        if (!AccessScope::canAccessDepartment($repair_request->department_id, $user)) abort(403);
 
         $data = $request->validate([
             'action' => 'required|in:mark_received,add_note',
@@ -722,8 +695,6 @@ class RepairRequestController extends Controller
     }
     public function proforma(RepairRequest $repair_request)
     {
-        $this->authorizeView($repair_request);
-
         $repair_request->load([
             'employee.department',
             'department',
@@ -1297,83 +1268,13 @@ Browsershot::html($html)
     }
 
     private function authorizeView(RepairRequest $request)
-{
-    $user = Auth::user();
-    $employee = $user ? $user->employee : null;
-
-    if (!$user) {
+    {
+        $user = Auth::user();
+        if ($user->isRole(['admin', 'college_admin', 'department_admin', 'director', 'storekeeper', 'programmer', 'd4_seat']) && AccessScope::canAccessDepartment($request->department_id, $user)) return true;
+        if ($this->employeeHasCharge($user->employee, 'Store Incharge')) return true;
+        if ($user->hasRole('employee') && optional($user->employee)->id == $request->employee_id) return true;
         abort(403);
     }
-
-    if ($this->userHasRole($user, 'superuser')) {
-        return true;
-    }
-
-    if ($this->userHasRole($user, 'd4_seat')) {
-        $allowed =
-            $request->current_handler_role === 'd4_seat'
-            || in_array($request->manual_sanction_status, [
-                'Submitted to D-4',
-                'Received at D-4',
-                'Sanction Received',
-                'Rejected',
-            ], true)
-            || in_array($request->status, [
-                'Submitted Manually to D-4',
-                'D-4 Received Manual File',
-                'Sanction Received',
-                'Sanction Rejected',
-            ], true)
-            || (
-                $employee &&
-                (int) $request->assigned_to_employee_id ===
-                (int) $employee->id
-            );
-
-        if ($allowed) {
-            return true;
-        }
-
-        abort(403, 'The request has not reached the D-4 workflow.');
-    }
-
-    if (
-        $employee &&
-        (
-            (int) $request->employee_id === (int) $employee->id
-            ||
-            (int) $request->assigned_to_employee_id ===
-            (int) $employee->id
-        )
-    ) {
-        return true;
-    }
-
-    if ($this->employeeHasCharge($employee, 'Store Incharge')) {
-        return true;
-    }
-
-    if (
-        $this->userHasRole($user, 'storekeeper')
-        || $this->userHasRole($user, 'programmer')
-        || $this->userHasRole($user, 'store_incharge')
-        || $this->userHasRole($user, 'admin')
-        || $this->userHasRole($user, 'college_admin')
-        || $this->userHasRole($user, 'department_admin')
-        || $this->userHasRole($user, 'director')
-    ) {
-        if (
-            AccessScope::canAccessDepartment(
-                $request->department_id,
-                $user
-            )
-        ) {
-            return true;
-        }
-    }
-
-    abort(403);
-}
 
     private function log(RepairRequest $request, $action, $old, $new, $remarks = null)
     {
