@@ -4,22 +4,236 @@
 @php
     $loggedUser = Auth::user();
 
+    $hasAnyRole = function ($roles) use ($loggedUser) {
+        if (!$loggedUser) {
+            return false;
+        }
+
+        $roles = is_array($roles) ? $roles : [$roles];
+
+        if (
+            method_exists($loggedUser, 'hasAnyRole')
+            && $loggedUser->hasAnyRole($roles)
+        ) {
+            return true;
+        }
+
+        foreach ($roles as $role) {
+            if (
+                method_exists($loggedUser, 'hasRole')
+                && $loggedUser->hasRole($role)
+            ) {
+                return true;
+            }
+
+            if (
+                method_exists($loggedUser, 'isRole')
+                && $loggedUser->isRole([$role])
+            ) {
+                return true;
+            }
+        }
+
+        return false;
+    };
+
+    $isSuperuser = $hasAnyRole(['superuser']);
+    $isStorekeeper = $hasAnyRole(['storekeeper']);
+    $isProgrammer = $hasAnyRole(['programmer']);
+    $isStoreIncharge = $hasAnyRole(['store_incharge']);
+    $isD4Seat = $hasAnyRole(['d4_seat']);
+
+    $isAdminLevel = $hasAnyRole([
+        'admin',
+        'college_admin',
+        'department_admin',
+        'director',
+    ]);
+
     $canCreateRequest =
         \App\Support\AccessScope::isEmployeeOnly($loggedUser)
-        || (
-            $loggedUser
-            && method_exists($loggedUser, 'isRole')
-            && $loggedUser->isRole([
-                'admin',
-                'college_admin',
-                'department_admin',
-                'director',
-                'storekeeper'
-            ])
-        );
+        || $hasAnyRole([
+            'admin',
+            'college_admin',
+            'department_admin',
+            'director',
+            'storekeeper',
+        ]);
+
+    /*
+     * Storekeeper scope is fixed to the Storekeeper's assigned
+     * College/Directorate and Department.
+     */
+    $lockStorekeeperScope =
+        $isStorekeeper
+        && !$isSuperuser;
+
+    $fixedCollegeId = isset($fixedCollegeId)
+        ? $fixedCollegeId
+        : \App\Support\AccessScope::collegeId($loggedUser);
+
+    $fixedDepartmentId = isset($fixedDepartmentId)
+        ? $fixedDepartmentId
+        : \App\Support\AccessScope::departmentId($loggedUser);
+
+    $selectedCollegeId = request(
+        'college_id',
+        $lockStorekeeperScope ? $fixedCollegeId : null
+    );
+
+    $selectedDepartmentId = request(
+        'department_id',
+        $lockStorekeeperScope ? $fixedDepartmentId : null
+    );
 
     $activeHandler = request('handler');
+
+    /*
+     * Role-aware Status dropdown.
+     */
+    if ($isSuperuser) {
+        $statusOptions = [
+            'Submitted to Storekeeper',
+            'Estimate Taken by Storekeeper',
+            'Sent to Programmer for Verification',
+            'Sent to Store Incharge for Verification',
+            'Programmer Received for Verification',
+            'Store Incharge Received for Verification',
+            'Programmer Verified Estimate OK',
+            'Store Incharge Verified Estimate OK',
+            'Programmer Returned - Estimate Not OK',
+            'Store Incharge Returned - Estimate Not OK',
+            'Programmer Asked for Revised Estimate',
+            'Store Incharge Asked for Revised Estimate',
+            'Financial Sanction Proforma Ready',
+            'Submitted Manually to D-4',
+            'D-4 Received Manual File',
+            'D-4 Put Up for Sanction',
+            'Sanction Received',
+            'Sanction Rejected',
+            'Work Completed - Employee Confirmation Pending',
+            'Reopened',
+            'Closed',
+            'Rejected',
+        ];
+    } elseif ($isStorekeeper) {
+        $statusOptions = [
+            'Submitted to Storekeeper',
+            'Estimate Taken by Storekeeper',
+            'Sent to Programmer for Verification',
+            'Sent to Store Incharge for Verification',
+            'Programmer Verified Estimate OK',
+            'Store Incharge Verified Estimate OK',
+            'Programmer Returned - Estimate Not OK',
+            'Store Incharge Returned - Estimate Not OK',
+            'Programmer Asked for Revised Estimate',
+            'Store Incharge Asked for Revised Estimate',
+            'Financial Sanction Proforma Ready',
+            'Submitted Manually to D-4',
+            'D-4 Put Up for Sanction',
+            'Sanction Received',
+            'Sanction Rejected',
+            'Work Completed - Employee Confirmation Pending',
+            'Closed',
+            'Rejected',
+        ];
+    } elseif ($isProgrammer || $isStoreIncharge) {
+        $statusOptions = [
+            'Sent to Programmer for Verification',
+            'Sent to Store Incharge for Verification',
+            'Programmer Received for Verification',
+            'Store Incharge Received for Verification',
+            'Programmer Verified Estimate OK',
+            'Store Incharge Verified Estimate OK',
+            'Programmer Returned - Estimate Not OK',
+            'Store Incharge Returned - Estimate Not OK',
+            'Programmer Asked for Revised Estimate',
+            'Store Incharge Asked for Revised Estimate',
+        ];
+    } elseif ($isD4Seat) {
+        $statusOptions = [
+            'Submitted Manually to D-4',
+            'D-4 Received Manual File',
+            'D-4 Put Up for Sanction',
+            'Sanction Received',
+            'Sanction Rejected',
+        ];
+    } elseif ($isAdminLevel) {
+        $statusOptions = [
+            'Submitted to Storekeeper',
+            'Estimate Taken by Storekeeper',
+            'Sent to Programmer for Verification',
+            'Sent to Store Incharge for Verification',
+            'Programmer Verified Estimate OK',
+            'Store Incharge Verified Estimate OK',
+            'Financial Sanction Proforma Ready',
+            'Submitted Manually to D-4',
+            'D-4 Put Up for Sanction',
+            'Sanction Received',
+            'Sanction Rejected',
+            'Work Completed - Employee Confirmation Pending',
+            'Closed',
+            'Rejected',
+        ];
+    } else {
+        $statusOptions = [
+            'Submitted to Storekeeper',
+            'Estimate Taken by Storekeeper',
+            'Sent to Programmer for Verification',
+            'Sent to Store Incharge for Verification',
+            'Programmer Verified Estimate OK',
+            'Store Incharge Verified Estimate OK',
+            'Submitted Manually to D-4',
+            'D-4 Put Up for Sanction',
+            'Sanction Received',
+            'Sanction Rejected',
+            'Work Completed - Employee Confirmation Pending',
+            'Reopened',
+            'Closed',
+            'Rejected',
+        ];
+    }
+
+    $statusOptions = array_values(array_unique($statusOptions));
 @endphp
+
+@push('styles')
+<style>
+    .rr-filter-label {
+        font-size: 12px;
+        font-weight: 700;
+        color: #495057;
+        margin-bottom: 4px;
+    }
+
+    .rr-fixed-field {
+        background: #f8f9fa;
+    }
+
+    .rr-table th {
+        white-space: nowrap;
+        vertical-align: middle;
+    }
+
+    .rr-table td {
+        vertical-align: middle;
+    }
+
+    .rr-problem {
+        min-width: 190px;
+        max-width: 300px;
+    }
+
+    .rr-status {
+        min-width: 180px;
+    }
+
+    .rr-search-help {
+        font-size: 11px;
+        color: #6c757d;
+    }
+</style>
+@endpush
 
 <div class="d-flex flex-wrap justify-content-between align-items-center mb-3">
     <div>
@@ -28,7 +242,9 @@
         @if($activeHandler)
             <small class="text-muted">
                 Queue:
-                <strong>{{ ucwords(str_replace('_', ' ', $activeHandler)) }}</strong>
+                <strong>
+                    {{ ucwords(str_replace('_', ' ', $activeHandler)) }}
+                </strong>
             </small>
         @endif
     </div>
@@ -43,8 +259,10 @@
 
 <div class="alert alert-info">
     <strong>Workflow:</strong>
-    Employee → Storekeeper → Vendor Estimate → Programmer / Store Incharge Verification
-    → Storekeeper prints Financial Sanction → Manual submission to D-4.
+    Employee → Storekeeper → Vendor Estimate →
+    Programmer / Store Incharge Verification →
+    Storekeeper prints Financial Sanction →
+    Manual submission to D-4.
 </div>
 
 <div class="card mb-3">
@@ -59,8 +277,9 @@
             @endif
 
             <div class="form-row">
-                <div class="col-md-4 mb-2">
-                    <label class="small font-weight-bold">
+
+                <div class="col-lg-4 col-md-6 mb-2">
+                    <label class="rr-filter-label">
                         Search
                     </label>
 
@@ -68,89 +287,159 @@
                            name="search"
                            value="{{ request('search') }}"
                            class="form-control"
-                           placeholder="Request no., employee, phone, category, problem, vendor, status, handler or assigned person">
+                           placeholder="Request no., employee, phone, category, problem, vendor, handler or assigned person">
+
+                    <small class="rr-search-help">
+                        Search by employee name, phone number, request number,
+                        problem, vendor, handler or assigned employee.
+                    </small>
                 </div>
 
-                @if(
-                    $loggedUser
-                    && method_exists($loggedUser, 'isRole')
-                    && $loggedUser->isRole([
-                        'admin',
-                        'college_admin',
-                        'department_admin',
-                        'director',
-                        'storekeeper'
-                    ])
-                )
-                    <div class="col-md-2 mb-2">
-                        <label class="small font-weight-bold">
+                @if($isSuperuser || $isAdminLevel || $isStorekeeper)
+
+                    <div class="col-lg-2 col-md-3 mb-2">
+                        <label class="rr-filter-label">
                             College / Directorate
                         </label>
 
-                        <select name="college_id"
-                                class="form-control">
+                        @if($lockStorekeeperScope)
+                            <input type="hidden"
+                                   name="college_id"
+                                   value="{{ $fixedCollegeId }}">
 
-                            <option value="">
-                                All Colleges / Directorates
-                            </option>
+                            <select class="form-control rr-fixed-field"
+                                    disabled>
+                                @forelse($colleges ?? [] as $c)
+                                    @if(
+                                        (string) $fixedCollegeId
+                                        === (string) $c->id
+                                    )
+                                        <option selected>
+                                            {{ $c->name }}
+                                        </option>
+                                    @endif
+                                @empty
+                                    <option selected>
+                                        Assigned College / Directorate
+                                    </option>
+                                @endforelse
+                            </select>
 
-                            @foreach($colleges ?? [] as $c)
-                                <option value="{{ $c->id }}"
-                                    {{ (string) request('college_id') === (string) $c->id ? 'selected' : '' }}>
-                                    {{ $c->name }}
+                            <small class="rr-search-help">
+                                Fixed according to your assigned office.
+                            </small>
+                        @else
+                            <select name="college_id"
+                                    class="form-control">
+
+                                <option value="">
+                                    All Colleges / Directorates
                                 </option>
-                            @endforeach
-                        </select>
+
+                                @foreach($colleges ?? [] as $c)
+                                    <option value="{{ $c->id }}"
+                                        {{ (string) $selectedCollegeId === (string) $c->id ? 'selected' : '' }}>
+
+                                        {{ $c->name }}
+                                    </option>
+                                @endforeach
+                            </select>
+                        @endif
                     </div>
 
-                    <div class="col-md-2 mb-2">
-                        <label class="small font-weight-bold">
+                    <div class="col-lg-2 col-md-3 mb-2">
+                        <label class="rr-filter-label">
                             Department
                         </label>
 
-                        <select name="department_id"
-                                class="form-control">
+                        @if($lockStorekeeperScope)
+                            <input type="hidden"
+                                   name="department_id"
+                                   value="{{ $fixedDepartmentId }}">
 
-                            <option value="">
-                                All Departments
-                            </option>
+                            <select class="form-control rr-fixed-field"
+                                    disabled>
+                                @forelse($departments ?? [] as $d)
+                                    @if(
+                                        (string) $fixedDepartmentId
+                                        === (string) $d->id
+                                    )
+                                        <option selected>
+                                            {{ $d->name }}
+                                        </option>
+                                    @endif
+                                @empty
+                                    <option selected>
+                                        Assigned Department
+                                    </option>
+                                @endforelse
+                            </select>
 
-                            @foreach($departments ?? [] as $d)
-                                <option value="{{ $d->id }}"
-                                    {{ (string) request('department_id') === (string) $d->id ? 'selected' : '' }}>
-                                    {{ $d->name }}
+                            <small class="rr-search-help">
+                                Fixed according to your assigned department.
+                            </small>
+                        @else
+                            <select name="department_id"
+                                    class="form-control">
+
+                                <option value="">
+                                    All Departments
                                 </option>
-                            @endforeach
-                        </select>
+
+                                @foreach($departments ?? [] as $d)
+                                    <option value="{{ $d->id }}"
+                                        {{ (string) $selectedDepartmentId === (string) $d->id ? 'selected' : '' }}>
+
+                                        {{ $d->name }}
+                                    </option>
+                                @endforeach
+                            </select>
+                        @endif
                     </div>
+
                 @endif
 
-                <div class="col-md-2 mb-2">
-                    <label class="small font-weight-bold">
+                <div class="col-lg-2 col-md-3 mb-2">
+                    <label class="rr-filter-label">
                         Status
                     </label>
 
-                    <input type="text"
-                           name="status"
-                           value="{{ request('status') }}"
-                           class="form-control"
-                           placeholder="Status">
+                    <select name="status"
+                            class="form-control">
+
+                        <option value="">
+                            All Relevant Statuses
+                        </option>
+
+                        @foreach($statusOptions as $statusOption)
+                            <option value="{{ $statusOption }}"
+                                {{ request('status') === $statusOption ? 'selected' : '' }}>
+
+                                {{ $statusOption }}
+                            </option>
+                        @endforeach
+                    </select>
                 </div>
 
-                <div class="col-md-2 mb-2 d-flex align-items-end">
-                    <button type="submit"
-                            class="btn btn-primary btn-block mr-1">
-                        Search
-                    </button>
+                <div class="col-lg-2 col-md-3 mb-2 d-flex align-items-end">
+                    <div class="w-100 d-flex">
+                        <button type="submit"
+                                class="btn btn-primary flex-fill mr-1">
+                            Search
+                        </button>
 
-                    <a href="{{ route(
-                            'repair-requests.index',
-                            $activeHandler ? ['handler' => $activeHandler] : []
-                        ) }}"
-                       class="btn btn-secondary">
-                        Reset
-                    </a>
+                        <a href="{{ route(
+                                'repair-requests.index',
+                                $activeHandler
+                                    ? ['handler' => $activeHandler]
+                                    : []
+                            ) }}"
+                           class="btn btn-secondary">
+                            Reset
+                        </a>
+                    </div>
                 </div>
+
             </div>
         </form>
     </div>
@@ -159,9 +448,10 @@
 <div class="card shadow-sm">
     <div class="card-body table-responsive">
 
-        <div class="d-flex justify-content-between align-items-center mb-2">
+        <div class="d-flex flex-wrap justify-content-between align-items-center mb-2">
             <div class="text-muted">
-                Total Records: <strong>{{ $requests->total() }}</strong>
+                Total Records:
+                <strong>{{ $requests->total() }}</strong>
             </div>
 
             @if(request('search'))
@@ -172,7 +462,7 @@
             @endif
         </div>
 
-        <table class="table table-bordered table-sm table-hover">
+        <table class="table table-bordered table-sm table-hover rr-table">
             <thead class="thead-light">
                 <tr>
                     <th>No.</th>
@@ -216,7 +506,9 @@
                             {{ optional($r->category)->name ?: '-' }}
                         </td>
 
-                        <td title="{{ $r->problem_description }}">
+                        <td class="rr-problem"
+                            title="{{ $r->problem_description }}">
+
                             {{ \Illuminate\Support\Str::limit(
                                 $r->problem_description,
                                 70
@@ -228,7 +520,9 @@
                                 <strong>
                                     {{ optional($r->selectedEstimate->vendor)->name ?: '-' }}
                                 </strong>
+
                                 <br>
+
                                 <small>
                                     Rs.
                                     {{ number_format(
@@ -241,7 +535,7 @@
                             @endif
                         </td>
 
-                        <td>
+                        <td class="rr-status">
                             <span class="badge badge-info">
                                 {{ $r->status ?: 'Pending' }}
                             </span>
@@ -279,7 +573,9 @@
                     <tr>
                         <td colspan="9"
                             class="text-center text-muted py-4">
-                            No repair requests found for the selected search or filters.
+
+                            No repair requests found for the selected search
+                            or filters.
                         </td>
                     </tr>
                 @endforelse
