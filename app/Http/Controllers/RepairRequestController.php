@@ -133,7 +133,7 @@ class RepairRequestController extends Controller
                 $q->where('current_handler_role', 'd4_seat')
                     ->orWhereIn('manual_sanction_status', [
                         'Submitted to D-4',
-                        'Received at D-4'
+                         'Put Up for Sanction',
                     ]);
             });
 
@@ -143,7 +143,7 @@ class RepairRequestController extends Controller
                         ->orWhere('current_handler_role', 'd4_seat')
                         ->orWhereIn('manual_sanction_status', [
                             'Submitted to D-4',
-                            'Received at D-4'
+                             'Put Up for Sanction',
                         ]);
                 });
             }
@@ -623,108 +623,59 @@ class RepairRequestController extends Controller
         || (
             !$user->hasRole('superuser')
             && !$user->hasRole('d4_seat')
-            && !$user->hasRole('admin')
-            && !$user->hasRole('college_admin')
-            && !$user->hasRole('department_admin')
-            && !$user->hasRole('director')
         )
     ) {
         abort(403);
     }
 
     /*
-     * D-4 and Superuser are not blocked by normal department scope.
+     * The action is allowed only after Storekeeper sends
+     * the printed file manually to D-4.
      */
     if (
-        !$user->hasRole('superuser')
-        && !$user->hasRole('d4_seat')
-        && !AccessScope::canAccessDepartment(
-            $repair_request->department_id,
-            $user
-        )
+        $repair_request->current_handler_role !== 'd4_seat'
+        || $repair_request->manual_sanction_status !== 'Submitted to D-4'
     ) {
-        abort(403);
+        return back()->withErrors(
+            'This file is not currently pending with the D-4 Seat.'
+        );
     }
 
     $data = $request->validate([
-        'action' => 'required|in:mark_received,sanction_put_up,add_note',
         'd4_remarks' => 'required|string|max:1500',
     ]);
 
     $oldStatus = $repair_request->status;
     $employeeId = $employee ? $employee->id : null;
 
+    $repair_request->d4_received_by = $employeeId;
+    $repair_request->d4_received_at = Carbon::now();
     $repair_request->d4_remarks = $data['d4_remarks'];
 
-    if ($data['action'] === 'mark_received') {
+    $repair_request->current_handler_role = 'd4_seat';
+    $repair_request->assigned_to_employee_id = $employeeId;
 
-        if (!in_array(
-            $repair_request->manual_sanction_status,
-            ['Submitted to D-4', 'Received at D-4'],
-            true
-        )) {
-            return back()->withErrors(
-                'Only a file submitted to D-4 can be marked as received.'
-            );
-        }
+    $repair_request->status = 'D-4 Put Up for Sanction';
+    $repair_request->manual_sanction_status = 'Put Up for Sanction';
 
-        $repair_request->d4_received_by = $employeeId;
-        $repair_request->d4_received_at =
-            $repair_request->d4_received_at ?: Carbon::now();
+    if (\Schema::hasColumn(
+        'repair_requests',
+        'sanction_put_up_at'
+    )) {
+        $repair_request->sanction_put_up_at = Carbon::now();
+    }
 
-        $repair_request->current_handler_role = 'd4_seat';
-        $repair_request->assigned_to_employee_id = $employeeId;
-        $repair_request->status = 'D-4 Received Manual File';
-        $repair_request->manual_sanction_status = 'Received at D-4';
-
-        $message =
-            'Physical financial sanction file received at D-4 seat.';
-
-    } elseif ($data['action'] === 'sanction_put_up') {
-
-        if (!in_array(
-            $repair_request->manual_sanction_status,
-            ['Received at D-4', 'Put Up for Sanction'],
-            true
-        )) {
-            return back()->withErrors(
-                'First mark the physical file as received at D-4.'
-            );
-        }
-
-        $repair_request->current_handler_role = 'd4_seat';
-        $repair_request->assigned_to_employee_id = $employeeId;
-
-        $repair_request->status = 'D-4 Put Up for Sanction';
-        $repair_request->manual_sanction_status =
-            'Put Up for Sanction';
-
-        /*
-         * Use these only if the columns exist.
-         */
-        if (\Schema::hasColumn(
-            'repair_requests',
-            'sanction_put_up_at'
-        )) {
-            $repair_request->sanction_put_up_at = Carbon::now();
-        }
-
-        if (\Schema::hasColumn(
-            'repair_requests',
-            'sanction_put_up_by'
-        )) {
-            $repair_request->sanction_put_up_by = $employeeId;
-        }
-
-        $message =
-            'Print taken and financial sanction case put up for approval.';
-
-    } else {
-
-        $message = 'D-4 note added.';
+    if (\Schema::hasColumn(
+        'repair_requests',
+        'sanction_put_up_by'
+    )) {
+        $repair_request->sanction_put_up_by = $employeeId;
     }
 
     $repair_request->save();
+
+    $message =
+        'Print taken and financial sanction case put up for approval.';
 
     $this->log(
         $repair_request,

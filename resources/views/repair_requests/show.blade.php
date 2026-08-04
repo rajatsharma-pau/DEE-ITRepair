@@ -471,109 +471,57 @@
         </div>
         @endif
 
-        @if($canD4Action)
-        <div class="card mb-3 rr-action-card">
-            <div class="card-header bg-light"
-                 data-toggle="collapse"
-                 data-target="#d4ActionBox"
-                 aria-expanded="true">
-                <strong>D-4 Seat Manual File Record</strong>
-                <small class="text-muted ml-2">
-                    Physical receipt → Print taken → Put up for sanction
-                </small>
-            </div>
+       @if(
+    $canD4Action
+    && $request->current_handler_role === 'd4_seat'
+    && $request->manual_sanction_status === 'Submitted to D-4'
+)
+    <div class="card mb-3 rr-action-card">
 
-            <div id="d4ActionBox" class="collapse show">
-                <div class="card-body">
+        <div class="card-header bg-light">
+            <strong>D-4 Seat Action</strong>
 
-                    <div class="alert alert-info py-2">
-                        <strong>D-4 workflow:</strong>
-                        First mark the physical file as received. After taking the print,
-                        record that the case has been put up before the competent authority
-                        for financial sanction.
-                    </div>
-
-                    <form id="d4ActionForm"
-                          method="POST"
-                          action="{{ route('repair-requests.d4-action', $request) }}">
-
-                        @csrf
-
-                        <div class="row">
-                            <div class="col-md-4 form-group">
-                                <label class="rr-required">D-4 Action</label>
-
-                                <select id="d4Action"
-                                        name="action"
-                                        class="form-control"
-                                        required>
-
-                                    <option value="">Select Action</option>
-
-                                    @if($canD4MarkReceived)
-                                        <option value="mark_received">
-                                            Mark Physical File Received
-                                        </option>
-                                    @endif
-
-                                    @if($canD4PutUp)
-                                        <option value="sanction_put_up">
-                                            Print Taken & Put Up for Sanction
-                                        </option>
-                                    @endif
-
-                                    <option value="add_note">
-                                        Add D-4 Note Only
-                                    </option>
-                                </select>
-
-                                <small class="rr-small-help">
-                                    The put-up action becomes available after the physical
-                                    file is marked as received.
-                                </small>
-                            </div>
-
-                            <div class="col-md-8 form-group">
-                                <label class="rr-required">D-4 Remarks</label>
-
-                                <textarea name="d4_remarks"
-                                          class="form-control"
-                                          rows="3"
-                                          required
-                                          placeholder="Example: Print of financial sanction proforma and estimate taken. Case put up before the competent authority for sanction.">{{ old('d4_remarks', $request->d4_remarks) }}</textarea>
-                            </div>
-                        </div>
-
-                        <button type="submit" class="btn btn-dark">
-                            Submit D-4 Action
-                        </button>
-                    </form>
-                </div>
-            </div>
+            <small class="text-muted ml-2">
+                Print taken and case put up for sanction
+            </small>
         </div>
-        @endif
 
-        @if($canManualUpdate)
-        <div class="card mb-3 rr-action-card">
-            <div class="card-header bg-light" data-toggle="collapse" data-target="#manualActionBox" aria-expanded="false">
-                <strong>Admin / Director Manual Correction</strong>
-                <small class="text-muted ml-2">Use only for correction.</small>
+        <div class="card-body">
+
+            <div class="alert alert-info py-2">
+                The Storekeeper has submitted the printed financial
+                sanction file to D-4. After taking the print and putting
+                up the case before the competent authority, enter remarks
+                and submit this action.
             </div>
-            <div id="manualActionBox" class="collapse">
-                <div class="card-body">
-                    <form method="POST" action="{{ route('repair-requests.status', $request) }}">
-                        @csrf
-                        <div class="row">
-                            <div class="col-md-3 form-group"><label class="rr-required">Status</label><input name="status" class="form-control" value="{{ $request->status }}" required></div>
-                            <div class="col-md-4 form-group"><label>Assign To</label><select name="assigned_to_employee_id" class="form-control"><option value="">No Change</option>@foreach($employees as $e)<option value="{{ $e->id }}">{{ $e->display_name }} - {{ $e->designation_name }}</option>@endforeach</select></div>
-                            <div class="col-md-5 form-group"><label>Remarks</label><input name="remarks" class="form-control"></div>
-                        </div>
-                        <button type="submit" class="btn btn-warning">Manual Update</button>
-                    </form>
+
+            <form id="d4ActionForm"
+                  method="POST"
+                  action="{{ route('repair-requests.d4-action', $request) }}">
+
+                @csrf
+
+                <div class="form-group">
+                    <label class="rr-required">
+                        D-4 Remarks
+                    </label>
+
+                    <textarea name="d4_remarks"
+                              class="form-control"
+                              rows="3"
+                              required
+                              placeholder="Example: Print of financial sanction proforma and vendor estimate taken. Case put up before the competent authority for sanction.">{{ old('d4_remarks', $request->d4_remarks) }}</textarea>
                 </div>
-            </div>
+
+                <button type="submit"
+                        class="btn btn-primary">
+
+                    Print Taken & Put Up for Sanction
+                </button>
+            </form>
         </div>
-        @endif
+    </div>
+@endif
 
         @if($canFeedback)
         <div class="card mb-3">
@@ -697,24 +645,16 @@
             return false;
         }
     });
-
-    $('#d4ActionForm').on('submit', function(e){
-        var action = $('#d4Action').val();
-
-        if (action === 'mark_received') {
-            if (!confirm('Confirm that the physical financial sanction file has been received at D-4?')) {
-                e.preventDefault();
-                return false;
-            }
-        }
-
-        if (action === 'sanction_put_up') {
-            if (!confirm('Confirm that the print has been taken and the case has been put up for financial sanction?')) {
-                e.preventDefault();
-                return false;
-            }
-        }
-    });
+$('#d4ActionForm').on('submit', function (e) {
+    if (
+        !confirm(
+            'Confirm that the print has been taken and the case has been put up for financial sanction?'
+        )
+    ) {
+        e.preventDefault();
+        return false;
+    }
+});
 })();
 </script>
 @endpush
