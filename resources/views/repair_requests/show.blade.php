@@ -471,7 +471,7 @@
         </div>
         @endif
 
-       @if(
+        @if(
     $canD4Action
     && $request->current_handler_role === 'd4_seat'
     && $request->manual_sanction_status === 'Submitted to D-4'
@@ -522,6 +522,28 @@
         </div>
     </div>
 @endif
+
+        @if($canManualUpdate)
+        <div class="card mb-3 rr-action-card">
+            <div class="card-header bg-light" data-toggle="collapse" data-target="#manualActionBox" aria-expanded="false">
+                <strong>Admin / Director Manual Correction</strong>
+                <small class="text-muted ml-2">Use only for correction.</small>
+            </div>
+            <div id="manualActionBox" class="collapse">
+                <div class="card-body">
+                    <form method="POST" action="{{ route('repair-requests.status', $request) }}">
+                        @csrf
+                        <div class="row">
+                            <div class="col-md-3 form-group"><label class="rr-required">Status</label><input name="status" class="form-control" value="{{ $request->status }}" required></div>
+                            <div class="col-md-4 form-group"><label>Assign To</label><select name="assigned_to_employee_id" class="form-control"><option value="">No Change</option>@foreach($employees as $e)<option value="{{ $e->id }}">{{ $e->display_name }} - {{ $e->designation_name }}</option>@endforeach</select></div>
+                            <div class="col-md-5 form-group"><label>Remarks</label><input name="remarks" class="form-control"></div>
+                        </div>
+                        <button type="submit" class="btn btn-warning">Manual Update</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        @endif
 
         @if($canFeedback)
         <div class="card mb-3">
@@ -645,7 +667,8 @@
             return false;
         }
     });
-$('#d4ActionForm').on('submit', function (e) {
+
+   $('#d4ActionForm').on('submit', function (e) {
     if (
         !confirm(
             'Confirm that the print has been taken and the case has been put up for financial sanction?'
