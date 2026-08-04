@@ -795,23 +795,38 @@ public static function apply(
         }
 
         if (!self::isSuperuser($user)) {
-            if (self::userHasRole($user, 'department_admin')) {
-                $departmentId = self::departmentId($user);
-                if ($departmentId) {
-                    $query->where('id', $departmentId);
-                } else {
-                    $query->whereRaw('1 = 0');
-                }
-            } else {
-                $collegeId = self::collegeId($user);
-                if ($collegeId) {
-                    $query->where('college_id', $collegeId);
-                } else {
-                    $query->whereRaw('1 = 0');
-                }
-            }
-        }
 
+    /*
+     * Department-scoped roles must see only their own department.
+     */
+    if (self::userHasAnyRole($user, [
+        'department_admin',
+        'storekeeper',
+        'programmer',
+        'store_incharge',
+        'd4_seat',
+    ])) {
+        $departmentId = self::departmentId($user);
+
+        if ($departmentId) {
+            $query->where('id', $departmentId);
+        } else {
+            $query->whereRaw('1 = 0');
+        }
+    } else {
+        /*
+         * Admin / College Admin / Director:
+         * all departments of their own College/Directorate.
+         */
+        $collegeId = self::collegeId($user);
+
+        if ($collegeId) {
+            $query->where('college_id', $collegeId);
+        } else {
+            $query->whereRaw('1 = 0');
+        }
+    }
+}
         return $query->orderBy('name')->get();
     }
 
