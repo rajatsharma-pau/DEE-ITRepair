@@ -80,9 +80,70 @@
         return false;
     };
 
-    $isSuperuser =
-        $authUser
-        && \App\Support\AccessScope::isSuperuser($authUser);
+    /*
+     * Detect Superuser independently of the employee posting.
+     * Some installations store roles in users.role, while others use
+     * hasRole(), hasAnyRole(), isRole() or roleNames().
+     */
+    $isSuperuser = false;
+
+    if ($authUser) {
+        if (
+            method_exists($authUser, 'hasAnyRole')
+            && $authUser->hasAnyRole(['superuser'])
+        ) {
+            $isSuperuser = true;
+        }
+
+        if (
+            !$isSuperuser
+            && method_exists($authUser, 'hasRole')
+            && $authUser->hasRole('superuser')
+        ) {
+            $isSuperuser = true;
+        }
+
+        if (
+            !$isSuperuser
+            && method_exists($authUser, 'isRole')
+            && (
+                $authUser->isRole('superuser')
+                || $authUser->isRole(['superuser'])
+            )
+        ) {
+            $isSuperuser = true;
+        }
+
+        if (
+            !$isSuperuser
+            && isset($authUser->role)
+            && \App\Support\AccessScope::normalizeRole($authUser->role)
+                === 'superuser'
+        ) {
+            $isSuperuser = true;
+        }
+
+        if (
+            !$isSuperuser
+            && method_exists($authUser, 'roleNames')
+        ) {
+            try {
+                $roleNames = $authUser->roleNames();
+
+                if (!is_array($roleNames)) {
+                    $roleNames = collect($roleNames)->toArray();
+                }
+
+                $roleNames = array_map(function ($role) {
+                    return \App\Support\AccessScope::normalizeRole($role);
+                }, $roleNames);
+
+                $isSuperuser = in_array('superuser', $roleNames, true);
+            } catch (\Exception $e) {
+                $isSuperuser = false;
+            }
+        }
+    }
 
     $isCollegeLevelAdmin = $hasAnyRole([
         'admin',
@@ -127,9 +188,18 @@
     $canChooseCollege = $isSuperuser;
     $canChooseDepartment = $isSuperuser || $isCollegeLevelAdmin;
 
-    if ($isDepartmentAdmin) {
+    /*
+     * Department Admin lock must never override Superuser access
+     * when the same user has multiple roles.
+     */
+    if ($isDepartmentAdmin && !$isSuperuser) {
         $canChooseCollege = false;
         $canChooseDepartment = false;
+    }
+
+    if ($isSuperuser) {
+        $canChooseCollege = true;
+        $canChooseDepartment = true;
     }
 
     $roleOptions = \App\Support\AccessScope::roleOptions(
