@@ -97,7 +97,77 @@ class RepairRequestController extends Controller
         if ($request->filled('status')) {
             $baseQuery->where('status', $request->status);
         }
+if ($request->filled('search')) {
+    $search = trim($request->search);
 
+    $baseQuery->where(function ($query) use ($search) {
+        /*
+         * Request fields
+         */
+        $query->where('request_no', 'like', '%' . $search . '%')
+            ->orWhere('problem_description', 'like', '%' . $search . '%')
+            ->orWhere('item_name', 'like', '%' . $search . '%')
+            ->orWhere('inventory_no', 'like', '%' . $search . '%')
+            ->orWhere('status', 'like', '%' . $search . '%')
+            ->orWhere('manual_sanction_status', 'like', '%' . $search . '%')
+            ->orWhere('current_handler_role', 'like', '%' . $search . '%');
+
+        /*
+         * Employee name and phone
+         */
+        $query->orWhereHas('employee', function ($employeeQuery) use ($search) {
+            $employeeQuery
+                ->where('first_name', 'like', '%' . $search . '%')
+                ->orWhere('middle_name', 'like', '%' . $search . '%')
+                ->orWhere('last_name', 'like', '%' . $search . '%')
+                ->orWhere('employee_code', 'like', '%' . $search . '%')
+                ->orWhereHas('user', function ($userQuery) use ($search) {
+                    $userQuery
+                        ->where('name', 'like', '%' . $search . '%')
+                        ->orWhere('phone', 'like', '%' . $search . '%')
+                        ->orWhere('mobile', 'like', '%' . $search . '%');
+                });
+        });
+
+        /*
+         * Category
+         */
+        $query->orWhereHas('category', function ($categoryQuery) use ($search) {
+            $categoryQuery
+                ->where('name', 'like', '%' . $search . '%')
+                ->orWhere('item_group', 'like', '%' . $search . '%');
+        });
+
+        /*
+         * Vendor
+         */
+        $query->orWhereHas(
+            'selectedEstimate.vendor',
+            function ($vendorQuery) use ($search) {
+                $vendorQuery
+                    ->where('name', 'like', '%' . $search . '%')
+                    ->orWhere('mobile', 'like', '%' . $search . '%')
+                    ->orWhere('gst_no', 'like', '%' . $search . '%');
+            }
+        );
+
+        /*
+         * Assigned employee
+         */
+        $query->orWhereHas('assignedTo', function ($assignedQuery) use ($search) {
+            $assignedQuery
+                ->where('first_name', 'like', '%' . $search . '%')
+                ->orWhere('middle_name', 'like', '%' . $search . '%')
+                ->orWhere('last_name', 'like', '%' . $search . '%')
+                ->orWhereHas('user', function ($userQuery) use ($search) {
+                    $userQuery
+                        ->where('name', 'like', '%' . $search . '%')
+                        ->orWhere('phone', 'like', '%' . $search . '%')
+                        ->orWhere('mobile', 'like', '%' . $search . '%');
+                });
+        });
+    });
+}
         /*
     |--------------------------------------------------------------------------
     | Handler filters
