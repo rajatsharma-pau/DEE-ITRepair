@@ -1,46 +1,119 @@
 @php
     $authUser = Auth::user();
+    $isEditMode = isset($employee) && $employee && $employee->exists;
 
     $safeDate = function ($value) {
         if (empty($value)) {
             return '';
         }
+
         try {
             if (is_object($value) && method_exists($value, 'format')) {
                 return $value->format('Y-m-d');
             }
+
             return date('Y-m-d', strtotime($value));
         } catch (\Exception $e) {
             return '';
         }
     };
 
-    $scopeCollegeId = null;
-    $scopeDepartmentId = null;
-
-    if ($authUser) {
-        if (method_exists(\App\Support\AccessScope::class, 'collegeId')) {
-            $scopeCollegeId = \App\Support\AccessScope::collegeId($authUser);
-        } elseif (isset($authUser->college_id)) {
-            $scopeCollegeId = $authUser->college_id;
+    /*
+     * Robust role check. This supports:
+     * - AccessScope role normalization
+     * - hasAnyRole()
+     * - hasRole()
+     * - isRole()
+     * - legacy users.role column
+     */
+    $hasAnyRole = function ($roles) use ($authUser) {
+        if (!$authUser) {
+            return false;
         }
 
-        if (method_exists(\App\Support\AccessScope::class, 'departmentId')) {
-            $scopeDepartmentId = \App\Support\AccessScope::departmentId($authUser);
-        } elseif (isset($authUser->department_id)) {
-            $scopeDepartmentId = $authUser->department_id;
+        $roles = is_array($roles) ? $roles : [$roles];
+
+        if (
+            method_exists($authUser, 'hasAnyRole')
+            && $authUser->hasAnyRole($roles)
+        ) {
+            return true;
         }
+
+        foreach ($roles as $role) {
+            if (
+                method_exists($authUser, 'hasRole')
+                && $authUser->hasRole($role)
+            ) {
+                return true;
+            }
+
+            if (
+                method_exists($authUser, 'isRole')
+                && (
+                    $authUser->isRole($role)
+                    || $authUser->isRole([$role])
+                )
+            ) {
+                return true;
+            }
+
+            if (
+                isset($authUser->role)
+                && \App\Support\AccessScope::normalizeRole($authUser->role)
+                    === \App\Support\AccessScope::normalizeRole($role)
+            ) {
+                return true;
+            }
+        }
+
+        return false;
+    };
+
+    $isSuperuser =
+        $authUser
+        && \App\Support\AccessScope::isSuperuser($authUser);
+
+    $isCollegeLevelAdmin = $hasAnyRole([
+        'admin',
+        'college_admin',
+        'director'
+    ]);
+
+    $isDepartmentAdmin = $hasAnyRole([
+        'department_admin'
+    ]);
+
+    $scopeCollegeId = $authUser
+        ? \App\Support\AccessScope::collegeId($authUser)
+        : null;
+
+    $scopeDepartmentId = $authUser
+        ? \App\Support\AccessScope::departmentId($authUser)
+        : null;
+
+    /*
+     * IMPORTANT:
+     * On CREATE, Superuser must not inherit their own employee posting.
+     * On EDIT, use the employee being edited.
+     */
+    if ($isEditMode) {
+        $defaultCollegeId = $employee->college_id;
+        $defaultDepartmentId = $employee->department_id;
+    } elseif ($isSuperuser) {
+        $defaultCollegeId = null;
+        $defaultDepartmentId = null;
+    } else {
+        $defaultCollegeId = $scopeCollegeId;
+        $defaultDepartmentId = $scopeDepartmentId;
     }
 
-    $selectedCollegeId = old('college_id', $employee->college_id ?: $scopeCollegeId);
-    $selectedDepartmentId = old('department_id', $employee->department_id ?: $scopeDepartmentId);
+    $selectedCollegeId = old('college_id', $defaultCollegeId);
+    $selectedDepartmentId = old('department_id', $defaultDepartmentId);
 
-    $isSuperuser = $authUser && method_exists($authUser, 'hasRole') && $authUser->hasRole('superuser');
-    $isCollegeLevelAdmin = $authUser && method_exists($authUser, 'hasAnyRole') && $authUser->hasAnyRole(['admin', 'college_admin', 'director']);
-    $isDepartmentAdmin = $authUser && method_exists($authUser, 'hasRole') && $authUser->hasRole('department_admin');
-
-    // Superuser can choose any college/department. College-level admin can choose department in own college.
-    // Department Admin and functional users are locked to their own posting/scope.
+    /*
+     * Permission to choose posting.
+     */
     $canChooseCollege = $isSuperuser;
     $canChooseDepartment = $isSuperuser || $isCollegeLevelAdmin;
 
@@ -49,10 +122,19 @@
         $canChooseDepartment = false;
     }
 
-    $roleOptions = \App\Support\AccessScope::roleOptions(isset($employee) ? $employee : null);
+    $roleOptions = \App\Support\AccessScope::roleOptions(
+        isset($employee) ? $employee : null,
+        $authUser
+    );
+
     $selectedRoles = old('roles', []);
 
-    if (empty($selectedRoles) && isset($employee) && $employee->user && method_exists($employee->user, 'roleNames')) {
+    if (
+        empty($selectedRoles)
+        && $isEditMode
+        && $employee->user
+        && method_exists($employee->user, 'roleNames')
+    ) {
         $selectedRoles = $employee->user->roleNames();
     }
 
@@ -64,7 +146,13 @@
         $selectedRoles = collect($selectedRoles)->toArray();
     }
 
-    $scopeText = method_exists(\App\Support\AccessScope::class, 'scopeLabel') ? \App\Support\AccessScope::scopeLabel($authUser) : 'Scope: Based on login';
+    $selectedRoles = array_map(function ($role) {
+        return \App\Support\AccessScope::normalizeRole($role);
+    }, $selectedRoles);
+
+    $scopeText = $isSuperuser
+        ? 'Scope: All PAU / University'
+        : \App\Support\AccessScope::scopeLabel($authUser);
 @endphp
 
 @push('styles')
@@ -91,7 +179,11 @@
     <div class="scope-box mb-3">
         <strong>{{ $scopeText }}</strong><br>
         <small>
-            College / Department is auto-filled from the logged-in user's scope. Superuser can choose any scope; Department Admin is locked to own department.
+            @if($isSuperuser)
+                Superuser can select any College/Directorate and any Department. The Superuser's own employee posting does not restrict this form.
+            @else
+                College / Department is filled according to your assigned scope. Department Admin is locked to the assigned department.
+            @endif
         </small>
     </div>
 
@@ -396,25 +488,46 @@
 
 @push('scripts')
 <script>
-function filterDepartments(){
-    var collegeId = $('#college_id').val();
-    $('#department_id option').each(function(){
-        var optCollege = $(this).data('college');
-        if(!$(this).val() || !collegeId || optCollege == collegeId){
-            $(this).show();
-        } else {
-            $(this).hide();
+var departmentSelect = $('#department_id');
+var allDepartmentOptions = departmentSelect.find('option').clone();
+var initialDepartmentId = @json($selectedDepartmentId);
+
+function filterDepartments(preserveDepartmentId) {
+    var collegeId = String($('#college_id').val() || '');
+
+    departmentSelect.empty();
+
+    allDepartmentOptions.each(function () {
+        var option = $(this).clone();
+        var optionValue = String(option.val() || '');
+        var optionCollege = String(option.data('college') || '');
+
+        if (
+            optionValue === ''
+            || collegeId === ''
+            || optionCollege === collegeId
+        ) {
+            departmentSelect.append(option);
         }
     });
 
-    var selected = $('#department_id option:selected');
-    if(collegeId && selected.val() && selected.data('college') != collegeId){
-        $('#department_id').val('');
+    if (
+        preserveDepartmentId
+        && departmentSelect.find(
+            'option[value="' + preserveDepartmentId + '"]'
+        ).length
+    ) {
+        departmentSelect.val(String(preserveDepartmentId));
+    } else {
+        departmentSelect.val('');
     }
 }
 
-$('#college_id').on('change', filterDepartments);
-filterDepartments();
+$('#college_id').on('change', function () {
+    filterDepartments(null);
+});
+
+filterDepartments(initialDepartmentId);
 
 $('#zip').on('blur', function(){
     var pin = $(this).val();

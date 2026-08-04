@@ -132,8 +132,47 @@ class EmployeeController extends Controller
 
         return view('employees.index', compact('employees', 'colleges', 'departments', 'search'));
     }
+public function create()
+{
+    $user = Auth::user();
 
-    public function create()
+    if (AccessScope::isSuperuser($user)) {
+        /*
+         * Superuser must see every active college and department.
+         * Do not use the Superuser's employee college/department.
+         */
+        $colleges = \App\College::where('is_active', 1)
+            ->orderBy('name')
+            ->get();
+
+        $departments = \App\Department::where('is_active', 1)
+            ->orderBy('name')
+            ->get();
+    } else {
+        $colleges = AccessScope::colleges($user);
+        $departments = AccessScope::departments(null, $user);
+    }
+
+    $designations = \App\Designation::where('is_active', 1)
+        ->orderBy('sort_order')
+        ->orderBy('name')
+        ->get();
+
+    $sections = \App\Section::where('is_active', 1)
+        ->orderBy('name')
+        ->get();
+
+    $roleOptions = AccessScope::roleOptions(null, $user);
+
+    return view('employees.create', compact(
+        'colleges',
+        'departments',
+        'designations',
+        'sections',
+        'roleOptions'
+    ));
+}
+    public function create1()
     {
         $deeCollege = College::where('name', 'Directorate of Extension Education')->first();
         $employee = new Employee([
@@ -159,7 +198,17 @@ class EmployeeController extends Controller
         $data = AccessScope::forceEmployeeScopeData($data);
         $data = $this->calculateDates($data);
         $data['full_name'] = $this->makeFullName($data);
+$department = \App\Department::where('id', $data['department_id'])
+    ->where('college_id', $data['college_id'])
+    ->first();
 
+if (!$department) {
+    return back()
+        ->withErrors(
+            'The selected department does not belong to the selected College/Directorate.'
+        )
+        ->withInput();
+}
         if ($request->hasFile('photo')) {
             $data['photo'] = $request->file('photo')->store('employee_photos', 'public');
         }
